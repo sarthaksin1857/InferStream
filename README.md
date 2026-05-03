@@ -1,10 +1,25 @@
-## What
-Building a inference system which can run on ones local laptop. I'm sure this exists already but it more for learning
+# InferStream
+
+Building a distributed LLM inference system designed to run across local laptops and machines. The goal is to demonstrate distributed compute, request batching for efficiency, scalable inference throughput, and basic LLM serving concepts.
+
+## Architecture
+
+The system follows a simple distributed layout with an in-memory queue, avoiding the need for complex external brokers like Kafka or Redis.
+
+It consists of three main components:
+1. **Coordinator Service**: The central "brain" of the system. It handles incoming client requests, assigns `request_id`s, manages an in-memory queue, and routes requests to workers.
+2. **Worker Nodes**: Distributed compute layers that load the model into memory (e.g., DistilGPT2 via Hugging Face), poll the coordinator for batches of work via gRPC, and run the actual PyTorch LLM forward passes (batching multiple requests when possible to improve throughput).
+3. **gRPC Layer**: Internal communication between the Coordinator and Workers is handled strictly via gRPC for high efficiency.
 
 ## Layout
 
-- `src/inferstream/` — installable package (`inferstream.inference`, `worker`, `gateway`, `messaging`).
-- `proto/` — `.proto` sources; regenerate Python stubs with `./scripts/regenerate_proto.sh` (requires `uv sync --group dev`). Generated `*_pb2.py` files under `src/` are **committed** so `pip install inferstream` works without installing `protoc`; many libraries do this, while others regenerate only in CI—either is valid.
+- `src/inferstream/` — installable package.
+  - `coordinator/`: Central service logic and queueing.
+  - `worker/`: Distributed compute node logic.
+  - `inference/`: Actual PyTorch LLM execution and KV-cache management.
+  - `grpc/`: Generated Python stubs from `.proto` definitions.
+  - `metrics/`: Generic metric registry for tracking throughput, latency, and memory.
+- `proto/` — `.proto` sources; regenerate Python stubs with `./scripts/regenerate_proto.sh` (requires `uv sync --group dev`). Generated `*_pb2.py` files under `src/` are committed.
 - `tests/` — pytest suite.
 
 ## Commands
