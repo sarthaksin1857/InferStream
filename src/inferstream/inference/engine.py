@@ -57,6 +57,9 @@ def generate(
                 current_input_ids = next_token  # ONLY last token
                 current_attention_mask = attention_mask  # still grows
 
+            # print("Current input_ids shape:", current_input_ids.shape)
+            # print("Current attention_mask shape:", current_attention_mask.shape)
+
             # 1. Forward pass
             # Plug in old cache if it exists
             outputs = model.forward(
@@ -70,6 +73,14 @@ def generate(
 
             # Get KV cache of all layers
             past_key_values = outputs.past_key_values
+            
+            if past_key_values is not None:
+                cache_size_bytes = 0
+                for layer_cache in past_key_values:
+                    for item in layer_cache:
+                        if isinstance(item, torch.Tensor):
+                            cache_size_bytes += item.element_size() * item.nelement()
+                metrics.observe("kv_cache_size_mb", cache_size_bytes / (1024 * 1024))
 
             # 3. Sample next token
             next_token = sample_next_token(logits, temperature=0.8, top_p=0.95)
