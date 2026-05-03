@@ -1,3 +1,7 @@
+[build-system]
+requires = ["hatchling>=1.27.0"]
+build-backend = "hatchling.build"
+
 [project]
 name = "inferstream"
 version = "0.1.0"
@@ -6,6 +10,20 @@ readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
     "pillow>=12.2.0",
+    "protobuf>=6.0.0",
     "torch>=2.11.0",
     "torchvision>=0.26.0",
+    "transformers>=4.40.0",
 ]
+
+[project.scripts]
+inferstream = "inferstream.cli:main"
+
+[dependency-groups]
+dev = [
+    "grpcio-tools>=1.60.0",
+    "pytest>=8.0.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/inferstream"]
