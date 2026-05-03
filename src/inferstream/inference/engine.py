@@ -1,13 +1,111 @@
 import os
+from typing import Dict, List
 
 import psutil
 import torch
-
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import (
+    AutoModelForCausalLM,
+    AutoTokenizer,
+    PreTrainedModel,
+    PreTrainedTokenizerBase,
+)
 
 from inferstream.metrics import metrics
 
+
+def generate(
+    model: PreTrainedModel,
+    tokenizer: PreTrainedTokenizerBase,
+    inputs: Dict[str, torch.Tensor],
+    max_new_tokens: int = 50,
+) -> List[str]:
+    """
+    General inference function for causal language models.
+    
+    Args:
+        model: The causal language model to use for generation.
+        tokenizer: The tokenizer corresponding to the model.
+        inputs: Dictionary of input tensors, containing at least 'input_ids' 
+                and optionally 'attention_mask'.
+        max_new_tokens: Maximum number of new tokens to generate.
+
+    Returns:
+        A list of decoded generated strings, stripped of special tokens.
+    """
+    input_ids = inputs["input_ids"]
+    attention_mask = inputs.get("attention_mask")
+
+    batch_size = input_ids.shape[0]
+    input_length = input_ids.shape[1]
+
+    metrics.observe("batch_size", batch_size)
+    metrics.observe("input_tokens", input_length)
+
+    with torch.no_grad():
+        metrics.start_timer("inference_total_time")
+
+        for i in range(max_new_tokens):
+            metrics.start_timer("token_generation_time")
+
+            # 1. Forward pass
+            outputs = model.forward(
+                input_ids=input_ids, attention_mask=attention_mask
+            )
+
+            # 2. Get logits for LAST token only
+            logits = outputs.logits[:, -1, :]  # shape: [B, vocab]
+
+            # 3. Sample next token
+            next_token = sample_next_token(logits, temperature=0.8, top_p=0.95)
+
+            # 4. Append to sequence
+            input_ids = torch.cat([input_ids, next_token], dim=1)
+
+            if attention_mask is not None:
+                attention_mask = torch.cat(
+                    [
+                        attention_mask,
+                        torch.ones(
+                            (batch_size, 1),
+                            dtype=attention_mask.dtype,
+                            device=attention_mask.device,
+                        ),
+                    ],
+                    dim=1,
+                )
+
+            duration = metrics.stop_timer("token_generation_time")
+            if i == 0:
+                metrics.observe("time_to_first_token_ms", duration * 1000)
+            else:
+                metrics.observe("time_per_output_token_ms", duration * 1000)
+
+            metrics.inc("total_generated_tokens", batch_size)
+
+        total_duration = metrics.stop_timer("inference_total_time")
+        if total_duration > 0:
+            metrics.observe(
+                "throughput_tokens_per_sec",
+                (max_new_tokens * batch_size) / total_duration,
+            )
+
+    # Decode
+    output_strings: List[str] = []
+    for output in input_ids:
+        text = tokenizer.decode(output, skip_special_tokens=True)
+        output_strings.append(text)
+
+    return output_strings
+
+
 def run_demo() -> None:
+    """
+    Runs a standalone demo of the inference engine.
+    
+    Loads a small language model (distilgpt2), tracks memory usage,
+    runs the inference loop using the generic generate function,
+    and reports latency/throughput metrics.
+    """
     # Device (Mac MPS or CPU)
     device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
     print(f"Using device: {device}")
@@ -48,49 +146,14 @@ def run_demo() -> None:
         truncation=True,
     ).to(device)
 
-    input_ids = inputs["input_ids"]
-
-    batch_size = input_ids.shape[0]
-    input_length = input_ids.shape[1]
-    metrics.observe("batch_size", batch_size)
-    metrics.observe("input_tokens", input_length)
-
     max_new_tokens = 50
 
-    with torch.no_grad():
-        metrics.start_timer("inference_total_time")
-
-        for i in range(max_new_tokens):
-            metrics.start_timer("token_generation_time")
-
-            # 1. Forward pass
-            outputs = model.forward(
-                input_ids=input_ids, attention_mask=(inputs["attention_mask"])
-            )
-
-            # 2. Get logits for LAST token only
-            logits = outputs.logits[:, -1, :]  # shape: [B, vocab]
-
-            # 3. Sample next token
-            next_token = sample_next_token(logits, temperature=0.8, top_p=0.95)
-
-            # 4. Append to sequence
-            input_ids = torch.cat([input_ids, next_token], dim=1)
-
-            duration = metrics.stop_timer("token_generation_time")
-            if i == 0:
-                metrics.observe("time_to_first_token_ms", duration * 1000)
-            else:
-                metrics.observe("time_per_output_token_ms", duration * 1000)
-
-            metrics.inc("total_generated_tokens", batch_size)
-
-        total_duration = metrics.stop_timer("inference_total_time")
-        if total_duration > 0:
-            metrics.observe(
-                "throughput_tokens_per_sec",
-                (max_new_tokens * batch_size) / total_duration,
-            )
+    output_strings = generate(
+        model=model,
+        tokenizer=tokenizer,
+        inputs=dict(inputs),
+        max_new_tokens=max_new_tokens,
+    )
 
     metrics.set_gauge("memory_system_mb_end", process.memory_info().rss / (1024 * 1024))
     if device.type == "mps":
@@ -98,9 +161,7 @@ def run_demo() -> None:
             "memory_mps_mb_end", torch.mps.current_allocated_memory() / (1024 * 1024)
         )
 
-    # Decode
-    for i, output in enumerate(input_ids):
-        text = tokenizer.decode(output, skip_special_tokens=True)
+    for i, text in enumerate(output_strings):
         print(f"\n--- OUTPUT {i} ---")
         print(text)
 
@@ -108,7 +169,23 @@ def run_demo() -> None:
     metrics.print_summary()
 
 
-def sample_next_token(logits, temperature=1.0, top_p=0.9):
+def sample_next_token(
+    logits: torch.Tensor, temperature: float = 1.0, top_p: float = 0.9
+) -> torch.Tensor:
+    """
+    Samples the next token from the output logits using nucleus sampling (top-p).
+    
+    Args:
+        logits: Unnormalized log probabilities from the model.
+        temperature: Controls the randomness of predictions. 
+                     Lower values make it more deterministic.
+        top_p: Nucleus sampling probability cutoff. Only the smallest set of 
+               most probable tokens with probabilities that add up to top_p or higher 
+               are kept for generation.
+               
+    Returns:
+        A tensor containing the sampled token index.
+    """
     # Apply temperature
     logits = logits / temperature
 
