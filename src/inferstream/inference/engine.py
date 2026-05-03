@@ -40,6 +40,7 @@ def generate(
 
     metrics.observe("batch_size", batch_size)
     metrics.observe("input_tokens", input_length)
+    past_key_values = None
 
     with torch.no_grad():
         metrics.start_timer("inference_total_time")
@@ -47,13 +48,39 @@ def generate(
         for i in range(max_new_tokens):
             metrics.start_timer("token_generation_time")
 
+            # For first iteration, use full input_ids + attention_mask
+            # For subsequent iterations, use only the last token + growing attention_mask
+            if i == 0:
+                current_input_ids = input_ids
+                current_attention_mask = attention_mask
+            else:
+                current_input_ids = next_token  # ONLY last token
+                current_attention_mask = attention_mask  # still grows
+
+            # print("Current input_ids shape:", current_input_ids.shape)
+            # print("Current attention_mask shape:", current_attention_mask.shape)
+
             # 1. Forward pass
+            # Plug in old cache if it exists
             outputs = model.forward(
-                input_ids=input_ids, attention_mask=attention_mask
+                input_ids=current_input_ids, attention_mask=current_attention_mask,
+                past_key_values=past_key_values,
+                use_cache=True  # Ensure caching is enabled
             )
 
             # 2. Get logits for LAST token only
             logits = outputs.logits[:, -1, :]  # shape: [B, vocab]
+
+            # Get KV cache of all layers
+            past_key_values = outputs.past_key_values
+            
+            if past_key_values is not None:
+                cache_size_bytes = 0
+                for layer_cache in past_key_values:
+                    for item in layer_cache:
+                        if isinstance(item, torch.Tensor):
+                            cache_size_bytes += item.element_size() * item.nelement()
+                metrics.observe("kv_cache_size_mb", cache_size_bytes / (1024 * 1024))
 
             # 3. Sample next token
             next_token = sample_next_token(logits, temperature=0.8, top_p=0.95)
@@ -61,6 +88,7 @@ def generate(
             # 4. Append to sequence
             input_ids = torch.cat([input_ids, next_token], dim=1)
 
+            # Append 1 to attention mask
             if attention_mask is not None:
                 attention_mask = torch.cat(
                     [
