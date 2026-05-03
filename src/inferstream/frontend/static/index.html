@@ -160,6 +160,29 @@
             color: var(--text-muted);
         }
 
+        select {
+            background: rgba(0, 0, 0, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: white;
+            padding: 14px 16px;
+            border-radius: 12px;
+            font-size: 0.95rem;
+            font-family: inherit;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        select:focus {
+            outline: none;
+            border-color: var(--accent);
+            background: rgba(0, 0, 0, 0.3);
+        }
+        
+        select option {
+            background: var(--bg-color);
+            color: white;
+        }
+
         button {
             background: var(--accent);
             color: white;
@@ -202,6 +225,11 @@
         <div class="message bot">Welcome to InferStream! Ask me anything.</div>
     </div>
     <div class="input-area">
+        <select id="length-select" title="Output Length">
+            <option value="short">Short</option>
+            <option value="medium">Medium</option>
+            <option value="long">Long</option>
+        </select>
         <input type="text" id="prompt-input" placeholder="Type a message..." autocomplete="off">
         <button id="send-btn">Send</button>
     </div>
@@ -211,6 +239,7 @@
     const messagesEl = document.getElementById('messages');
     const inputEl = document.getElementById('prompt-input');
     const sendBtn = document.getElementById('send-btn');
+    const lengthSelectEl = document.getElementById('length-select');
 
     let isPolling = false;
 
@@ -284,7 +313,7 @@
             const res = await fetch('/api/generate', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ prompt: prompt, max_new_tokens: 100 })
+                body: JSON.stringify({ prompt: prompt, length: lengthSelectEl.value })
             });
             const data = await res.json();
             
