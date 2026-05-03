@@ -32,6 +32,23 @@ uv run pytest          # tests
 ./scripts/regenerate_proto.sh   # protobuf → src/inferstream/grpc/generated/
 ```
 
+### Running the Services
+
+To spin up the system locally, you need to start the Coordinator and the Frontend UI.
+
+1. **Start the Coordinator (gRPC Backend)**:
+   ```bash
+   uv run inferstream-coordinator
+   ```
+   This will run on `[::]:50051`.
+
+2. **Start the Frontend UI (FastAPI Server)**:
+   In a new terminal window:
+   ```bash
+   uv run inferstream-frontend
+   ```
+   This will bind to `http://0.0.0.0:8000/`. You can open this in your browser to interact with the chat UI.
+
 ## Publishing (PyPI)
 
 Build artifacts land in `dist/` (gitignored). Upload requires a [PyPI API token](https://pypi.org/manage/account/token/):

@@ -10,7 +10,10 @@ service CoordinatorService {
   
   // Submit a new prompt for inference.
   rpc SubmitRequest(SubmitRequestReq) returns (SubmitRequestRes);
-
+  
+  // Poll for the result of a submitted request.
+  rpc GetResult(GetResultReq) returns (GetResultRes);
+  
   // ---------------------------------------------------------
   // Worker Endpoints
   // ---------------------------------------------------------
@@ -25,15 +28,33 @@ service CoordinatorService {
   rpc SubmitResults(SubmitResultsReq) returns (SubmitResultsRes);
 }
 
+
 // --- Submit Request ---
 message SubmitRequestReq {
   string prompt = 1;
+  int32 max_new_tokens = 2;
+  float temperature = 3;
+  float top_p = 4;
 }
 
 message SubmitRequestRes {
   string request_id = 1;
-  // Note: For a real system, you might want a way to poll for the result 
-  // or use a streaming response. For now, we keep it simple.
+}
+
+// --- Get Result ---
+message GetResultReq {
+  string request_id = 1;
+}
+
+enum RequestStatus {
+  PENDING = 0;
+  COMPLETED = 1;
+  FAILED = 2;
+}
+
+message GetResultRes {
+  RequestStatus status = 1;
+  string generated_text = 2; // Only populated if status is COMPLETED
 }
 
 // --- Register Worker ---
