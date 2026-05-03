@@ -1,8 +1,0 @@
-syntax = "proto3";
-
-package inferstream.v1;
-
-// Unit of work dispatched to inference workers (Kafka payload shape TBD).
-message InferenceJob {
-  string name = 1;
-}
