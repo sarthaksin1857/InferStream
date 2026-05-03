@@ -1,6 +1,7 @@
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
+from inferstream.metrics import metrics
 
 def run_demo() -> None:
     # Device (Mac MPS or CPU)
@@ -36,10 +37,19 @@ def run_demo() -> None:
 
     input_ids = inputs["input_ids"]
 
+    batch_size = input_ids.shape[0]
+    input_length = input_ids.shape[1]
+    metrics.observe("batch_size", batch_size)
+    metrics.observe("input_tokens", input_length)
+
     max_new_tokens = 50
 
     with torch.no_grad():
-        for _ in range(max_new_tokens):
+        metrics.start_timer("inference_total_time")
+
+        for i in range(max_new_tokens):
+            metrics.start_timer("token_generation_time")
+
             # 1. Forward pass
             outputs = model.forward(
                 input_ids=input_ids, attention_mask=(inputs["attention_mask"])
@@ -54,11 +64,29 @@ def run_demo() -> None:
             # 4. Append to sequence
             input_ids = torch.cat([input_ids, next_token], dim=1)
 
+            duration = metrics.stop_timer("token_generation_time")
+            if i == 0:
+                metrics.observe("time_to_first_token_ms", duration * 1000)
+            else:
+                metrics.observe("time_per_output_token_ms", duration * 1000)
+
+            metrics.inc("total_generated_tokens", batch_size)
+
+        total_duration = metrics.stop_timer("inference_total_time")
+        if total_duration > 0:
+            metrics.observe(
+                "throughput_tokens_per_sec",
+                (max_new_tokens * batch_size) / total_duration,
+            )
+
     # Decode
     for i, output in enumerate(input_ids):
         text = tokenizer.decode(output, skip_special_tokens=True)
         print(f"\n--- OUTPUT {i} ---")
         print(text)
+
+    # Print collected metrics
+    metrics.print_summary()
 
 
 def sample_next_token(logits, temperature=1.0, top_p=0.9):
