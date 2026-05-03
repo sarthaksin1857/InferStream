@@ -24,9 +24,7 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 class GenerateRequest(BaseModel):
     prompt: str
-    max_new_tokens: int = 50
-    temperature: float = 0.8
-    top_p: float = 0.95
+    length: str = "short"
 
 @app.get("/", response_class=HTMLResponse)
 async def read_index():
@@ -36,11 +34,18 @@ async def read_index():
 @app.post("/api/generate")
 async def submit_generate(req: GenerateRequest, request: Request):
     stub = request.app.state.stub
+    
+    length_enum = coordinator_pb2.SHORT
+    if req.length.lower() == "medium":
+        length_enum = coordinator_pb2.MEDIUM
+    elif req.length.lower() == "long":
+        length_enum = coordinator_pb2.LONG
+        
     grpc_req = coordinator_pb2.SubmitRequestReq(
-        prompt=req.prompt,
-        max_new_tokens=req.max_new_tokens,
-        temperature=req.temperature,
-        top_p=req.top_p,
+        parameters=coordinator_pb2.InferenceParameters(
+            prompt=req.prompt,
+            length=length_enum,
+        )
     )
     res = await stub.SubmitRequest(grpc_req)
     return {"request_id": res.request_id}

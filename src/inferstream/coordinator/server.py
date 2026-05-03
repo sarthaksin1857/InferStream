@@ -9,12 +9,12 @@ from inferstream.grpc.generated.inferstream.v1 import coordinator_pb2_grpc
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+from inferstream.coordinator.state_store import StateStore
+
 class CoordinatorServiceServicer(coordinator_pb2_grpc.CoordinatorServiceServicer):
     def __init__(self):
         super().__init__()
-        # Store request state for polling: {request_id: {"status": coordinator_pb2.PENDING, "text": ""}}
-        self.requests_state = {}
-        self.workers = set()
+        self.state_store = StateStore()
 
     async def SubmitRequest(
         self,
@@ -22,13 +22,10 @@ class CoordinatorServiceServicer(coordinator_pb2_grpc.CoordinatorServiceServicer
         context: grpc.aio.ServicerContext,
     ) -> coordinator_pb2.SubmitRequestRes:
         request_id = str(uuid.uuid4())
-        logger.info(f"Received SubmitRequest: prompt='{request.prompt}' (id={request_id})")
-        
-        # Store in state
-        self.requests_state[request_id] = {
-            "status": coordinator_pb2.PENDING,
-            "text": ""
-        }
+        logger.info(f"Received SubmitRequest: prompt='{request.parameters.prompt}' (id={request_id})")
+
+        task = coordinator_pb2.InferenceTask(request_id=request_id, parameters=request.parameters)
+        await self.state_store.register_job(request_id, task)
         
         return coordinator_pb2.SubmitRequestRes(
             request_id=request_id,
@@ -40,39 +37,38 @@ class CoordinatorServiceServicer(coordinator_pb2_grpc.CoordinatorServiceServicer
         context: grpc.aio.ServicerContext,
     ) -> coordinator_pb2.GetResultRes:
         logger.info(f"Received GetResult: request_id={request.request_id}")
-        state = self.requests_state.get(request.request_id)
-
-        return coordinator_pb2.GetResultRes(
-            status=coordinator_pb2.COMPLETED,
-            generated_text="lol"
-        )
+        status = self.state_store.get_status(request.request_id)
         
-        if not state:
-            # If not found, returning FAILED for now
+        if status is None:
             return coordinator_pb2.GetResultRes(
                 status=coordinator_pb2.FAILED,
                 generated_text=""
             )
+
+        res = coordinator_pb2.GetResultRes(status=status)
+        if status == coordinator_pb2.COMPLETED:
+            res.generated_text = self.state_store.get_completed_results(request.request_id) or ""
             
-        return coordinator_pb2.GetResultRes(
-            status=state["status"],
-            generated_text=state["text"]
-        )
+        return res
 
     async def RegisterWorker(
         self,
         request: coordinator_pb2.RegisterWorkerReq,
         context: grpc.aio.ServicerContext,
     ) -> coordinator_pb2.RegisterWorkerRes:
-        logger.info(f"Received RegisterWorker: worker_id={request.worker_id}")
-        self.workers.add(request.worker_id)
+        logger.info(f"Received RegisterWorker: worker_id={request.worker.worker_id}")
+        self.state_store.register_worker(request.worker.worker_id)
         return coordinator_pb2.RegisterWorkerRes(success=True)
 
     async def GetWork(
         self, request: coordinator_pb2.GetWorkReq, context: grpc.aio.ServicerContext
     ) -> coordinator_pb2.GetWorkRes:
         logger.info(f"Received GetWork: worker_id={request.worker_id}")
-        return coordinator_pb2.GetWorkRes(tasks=[])
+
+        worker = coordinator_pb2.Worker(worker_id=request.worker_id)
+        assigned_tasks = await self.state_store.assignWork(worker)
+
+        return coordinator_pb2.GetWorkRes(tasks=assigned_tasks)
 
     async def SubmitResults(
         self,
@@ -80,6 +76,8 @@ class CoordinatorServiceServicer(coordinator_pb2_grpc.CoordinatorServiceServicer
         context: grpc.aio.ServicerContext,
     ) -> coordinator_pb2.SubmitResultsRes:
         logger.info(f"Received SubmitResults: worker_id={request.worker_id}, results={len(request.results)}")
+        for result in request.results:
+            self.state_store.mark_completed(result.request_id, result.generated_text)
         return coordinator_pb2.SubmitResultsRes(success=True)
 
 

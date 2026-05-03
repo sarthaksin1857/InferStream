@@ -29,12 +29,22 @@ service CoordinatorService {
 }
 
 
+enum TaskLength {
+  LENGTH_UNSPECIFIED = 0;
+  SHORT = 1;
+  MEDIUM = 2;
+  LONG = 3;
+}
+
+// Shared parameters for generating inference
+message InferenceParameters {
+  string prompt = 1;
+  TaskLength length = 2;
+}
+
 // --- Submit Request ---
 message SubmitRequestReq {
-  string prompt = 1;
-  int32 max_new_tokens = 2;
-  float temperature = 3;
-  float top_p = 4;
+  InferenceParameters parameters = 1;
 }
 
 message SubmitRequestRes {
@@ -50,6 +60,7 @@ enum RequestStatus {
   PENDING = 0;
   COMPLETED = 1;
   FAILED = 2;
+  ASSIGNED = 3;
 }
 
 message GetResultRes {
@@ -60,7 +71,12 @@ message GetResultRes {
 // --- Register Worker ---
 message RegisterWorkerReq {
   // A unique identifier for the worker (e.g. hostname or UUID).
+  Worker worker = 1;
+}
+
+message Worker {
   string worker_id = 1;
+  int64 maxMemoryAssignment = 2; 
 }
 
 message RegisterWorkerRes {
@@ -76,7 +92,7 @@ message GetWorkReq {
 // A single item of work for the worker to process.
 message InferenceTask {
   string request_id = 1;
-  string prompt = 2;
+  InferenceParameters parameters = 2;
 }
 
 message GetWorkRes {
