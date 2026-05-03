@@ -1,4 +1,8 @@
+import os
+
+import psutil
 import torch
+
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from inferstream.metrics import metrics
@@ -21,6 +25,15 @@ def run_demo() -> None:
 
     model.to(device)
     model.eval()
+
+    process = psutil.Process(os.getpid())
+    metrics.set_gauge(
+        "memory_system_mb_start", process.memory_info().rss / (1024 * 1024)
+    )
+    if device.type == "mps":
+        metrics.set_gauge(
+            "memory_mps_mb_start", torch.mps.current_allocated_memory() / (1024 * 1024)
+        )
 
     # Input prompt
     prompt = "Once upon a time in distributed systems,"
@@ -78,6 +91,12 @@ def run_demo() -> None:
                 "throughput_tokens_per_sec",
                 (max_new_tokens * batch_size) / total_duration,
             )
+
+    metrics.set_gauge("memory_system_mb_end", process.memory_info().rss / (1024 * 1024))
+    if device.type == "mps":
+        metrics.set_gauge(
+            "memory_mps_mb_end", torch.mps.current_allocated_memory() / (1024 * 1024)
+        )
 
     # Decode
     for i, output in enumerate(input_ids):

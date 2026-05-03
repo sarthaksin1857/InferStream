@@ -12,6 +12,7 @@ class MetricRegistry:
         self.counters: Dict[str, float] = defaultdict(float)
         self.histograms: Dict[str, List[float]] = defaultdict(list)
         self.timers: Dict[str, float] = {}
+        self.gauges: Dict[str, float] = {}
 
     def inc(self, name: str, value: float = 1.0) -> None:
         """Increment a counter."""
@@ -20,6 +21,10 @@ class MetricRegistry:
     def observe(self, name: str, value: float) -> None:
         """Observe a value for a histogram."""
         self.histograms[name].append(value)
+
+    def set_gauge(self, name: str, value: float) -> None:
+        """Set a gauge to a specific value."""
+        self.gauges[name] = value
 
     def start_timer(self, name: str) -> None:
         """Start a timer."""
@@ -60,6 +65,12 @@ class MetricRegistry:
                 print(f"    min   = {min_val:.4f}")
                 print(f"    max   = {max_val:.4f}")
 
+        if self.gauges:
+            print("\nGauges (Current Values):")
+            print("-" * 40)
+            for name, value in sorted(self.gauges.items()):
+                print(f"  {name:<25} : {value:.2f}")
+
         print("=" * 40 + "\n")
 
     def reset(self) -> None:
@@ -67,3 +78,4 @@ class MetricRegistry:
         self.counters.clear()
         self.histograms.clear()
         self.timers.clear()
+        self.gauges.clear()
