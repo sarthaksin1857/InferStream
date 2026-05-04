@@ -55,18 +55,18 @@ async def get_result(request_id: str, request: Request):
     stub = request.app.state.stub
     grpc_req = coordinator_pb2.GetResultReq(request_id=request_id)
     res = await stub.GetResult(grpc_req)
-    
-    status_str = "UNKNOWN"
-    if res.status == coordinator_pb2.PENDING:
-        status_str = "PENDING"
-    elif res.status == coordinator_pb2.COMPLETED:
-        status_str = "COMPLETED"
-    elif res.status == coordinator_pb2.FAILED:
-        status_str = "FAILED"
-        
+
+    status_map = {
+        coordinator_pb2.PENDING:   "PENDING",
+        coordinator_pb2.ASSIGNED:  "ASSIGNED",
+        coordinator_pb2.COMPLETED: "COMPLETED",
+        coordinator_pb2.FAILED:    "FAILED",
+    }
+    status_str = status_map.get(res.status, "UNKNOWN")
+
     return {
         "status": status_str,
-        "generated_text": res.generated_text
+        "generated_text": res.generated_text,
     }
 
 def main():

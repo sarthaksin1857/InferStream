@@ -1,8 +1,10 @@
 import os
-from typing import Dict, List
+from typing import Dict, List, Optional
+from dataclasses import dataclass, field
 
 import psutil
 import torch
+import torch.nn.functional as F
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
@@ -13,120 +15,396 @@ from transformers import (
 from inferstream.metrics import metrics
 
 
-def generate(
-    model: PreTrainedModel,
-    tokenizer: PreTrainedTokenizerBase,
-    inputs: Dict[str, torch.Tensor],
-    max_new_tokens: int = 50,
-) -> List[str]:
+# ---------------------------------------------------------------------------
+# Request: the unit of work flowing through the engine
+# ---------------------------------------------------------------------------
+# Each Request tracks a single prompt from submission through completion.
+# The coordinator assigns a string request_id; internally the engine also
+# assigns an integer slot id so we can index into batch tensors.
+# ---------------------------------------------------------------------------
+
+@dataclass
+class Request:
+    """A single inference request managed by the ContinuousBatchingEngine.
+
+    Fields:
+        request_id:       Unique identifier (int slot id assigned by the engine).
+        prompt:           The raw text prompt submitted by the caller.
+        input_ids:        Tokenized prompt tensor, shape [1, seq_len].
+        max_new_tokens:   How many tokens to generate before marking complete.
+        generated_tokens: Token ids produced so far (appended each step).
+        status:           Lifecycle state — "pending" → "active" → "completed".
+        external_id:      Optional string id from an external system (e.g. the
+                          coordinator's request_id) so callers can correlate
+                          completed Requests back to their own tracking.
     """
-    General inference function for causal language models.
-    
+    request_id: int
+    prompt: str
+    input_ids: torch.Tensor
+    max_new_tokens: int
+    generated_tokens: List[int] = field(default_factory=list)
+    status: str = "pending"  # pending, active, completed
+    external_id: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# Slot: a fixed inference slot that holds one request at a time
+# ---------------------------------------------------------------------------
+# Each slot owns its own KV cache and attention mask.  When the request
+# finishes, the slot is fully cleared — KV cache is discarded, and the
+# next request starts from scratch at its own prompt length.  This prevents
+# the unbounded sequence-length growth that occurs with a shared padded
+# batch cache.
+# ---------------------------------------------------------------------------
+
+@dataclass
+class Slot:
+    """A fixed inference slot that can hold one active request at a time.
+
+    Fields:
+        slot_id:        Immutable index of this slot (0 .. max_slots-1).
+        request:        The currently assigned Request, or None if free.
+        kv_cache:       Per-slot KV cache (DynamicCache), shape per layer:
+                        [1, heads, seq_len, head_dim].  None when free.
+        attention_mask: Per-slot attention mask, shape [1, seq_len].
+                        None when free.
+        needs_prefill:  True if the slot was just filled and needs a full
+                        prefill forward pass before it can decode.
+    """
+    slot_id: int
+    request: Optional[Request] = None
+    kv_cache: object = None            # DynamicCache — typed as object to
+    attention_mask: Optional[torch.Tensor] = None  # avoid import dependency
+    needs_prefill: bool = False
+
+    @property
+    def is_free(self) -> bool:
+        return self.request is None
+
+    @property
+    def is_active(self) -> bool:
+        return self.request is not None and not self.needs_prefill
+
+    def clear(self) -> None:
+        """Fully reset the slot, discarding KV cache and request."""
+        self.request = None
+        self.kv_cache = None
+        self.attention_mask = None
+        self.needs_prefill = False
+
+
+# ---------------------------------------------------------------------------
+# ContinuousBatchingEngine
+# ---------------------------------------------------------------------------
+# This is the core of the inference server.  It operates with a fixed number
+# of Slots, each holding at most one request at a time.
+#
+# Unlike the previous shared-batch design, each slot maintains its own
+# independent KV cache.  This means:
+#
+#   • A new request entering a vacated slot starts at its own prompt length —
+#     it does NOT inherit the sequence length of surviving requests.
+#   • Memory is bounded by: max_slots × max_seq_len × per_token_kv_bytes.
+#   • No cross-slot padding is needed.
+#
+# The trade-off is that each slot runs its own forward pass (batch=1)
+# instead of one large batched forward pass.  For small max_slots on a
+# single device this is acceptable — extreme padding in the batched
+# approach often negates the GPU parallelism benefit anyway.
+#
+# Lifecycle of a request through the engine:
+#
+#   add_request()          →  enqueued in self.pending_requests
+#   step() PHASE 1 — FILL →  assigned to a free Slot, needs_prefill = True
+#   step() PHASE 2 — PREFILL → full prompt forward pass, first token
+#                              generated, KV cache stored in the Slot
+#   step() PHASE 3 — DECODE  → single-token forward pass, token appended
+#   step() PHASE 4 — EVICT   → slot fully cleared, request returned
+# ---------------------------------------------------------------------------
+
+class ContinuousBatchingEngine:
+    """Slot-based continuous batching engine with per-request KV caches.
+
     Args:
-        model: The causal language model to use for generation.
-        tokenizer: The tokenizer corresponding to the model.
-        inputs: Dictionary of input tensors, containing at least 'input_ids' 
-                and optionally 'attention_mask'.
-        max_new_tokens: Maximum number of new tokens to generate.
-
-    Returns:
-        A list of decoded generated strings, stripped of special tokens.
+        model:       A HuggingFace causal LM already on the target device.
+        tokenizer:   The corresponding tokenizer.
+        max_slots:   Maximum number of requests generating tokens at once.
+                     This directly caps KV-cache memory usage.
+        max_seq_len: Hard cap on per-slot sequence length (prompt + generated).
+                     Requests whose total would exceed this are still accepted
+                     but will be stopped early.
     """
-    input_ids = inputs["input_ids"]
-    attention_mask = inputs.get("attention_mask")
 
-    batch_size = input_ids.shape[0]
-    input_length = input_ids.shape[1]
+    def __init__(
+        self,
+        model: PreTrainedModel,
+        tokenizer: PreTrainedTokenizerBase,
+        max_slots: int = 8,
+        max_seq_len: int = 512,
+    ):
+        self.model = model
+        self.tokenizer = tokenizer
+        self.max_slots = max_slots
+        self.max_seq_len = max_seq_len
 
-    metrics.observe("batch_size", batch_size)
-    metrics.observe("input_tokens", input_length)
-    past_key_values = None
+        # Queues
+        self.pending_requests: List[Request] = []
 
-    with torch.no_grad():
-        metrics.start_timer("inference_total_time")
+        # Fixed-size slot array — the core of the new design
+        self.slots: List[Slot] = [Slot(slot_id=i) for i in range(max_slots)]
 
-        for i in range(max_new_tokens):
-            metrics.start_timer("token_generation_time")
+        # Auto-incrementing request id counter
+        self.next_request_id = 0
 
-            # For first iteration, use full input_ids + attention_mask
-            # For subsequent iterations, use only the last token + growing attention_mask
-            if i == 0:
-                current_input_ids = input_ids
-                current_attention_mask = attention_mask
-            else:
-                current_input_ids = next_token  # ONLY last token
-                current_attention_mask = attention_mask  # still grows
+    # ------------------------------------------------------------------
+    # Convenience accessors (backwards-compatible surface for tests/worker)
+    # ------------------------------------------------------------------
 
-            # print("Current input_ids shape:", current_input_ids.shape)
-            # print("Current attention_mask shape:", current_attention_mask.shape)
+    @property
+    def active_requests(self) -> List[Request]:
+        """List of all requests currently assigned to a slot (active or prefilling)."""
+        return [s.request for s in self.slots if s.request is not None]
 
-            # 1. Forward pass
-            # Plug in old cache if it exists
-            outputs = model.forward(
-                input_ids=current_input_ids, attention_mask=current_attention_mask,
-                past_key_values=past_key_values,
-                use_cache=True  # Ensure caching is enabled
-            )
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
 
-            # 2. Get logits for LAST token only
-            logits = outputs.logits[:, -1, :]  # shape: [B, vocab]
+    def add_request(
+        self,
+        prompt: str,
+        max_new_tokens: int = 50,
+        external_id: Optional[str] = None,
+    ) -> int:
+        """Enqueue a new prompt for generation.
 
-            # Get KV cache of all layers
-            past_key_values = outputs.past_key_values
-            
-            if past_key_values is not None:
-                cache_size_bytes = 0
-                for layer_cache in past_key_values:
-                    for item in layer_cache:
-                        if isinstance(item, torch.Tensor):
-                            cache_size_bytes += item.element_size() * item.nelement()
-                metrics.observe("kv_cache_size_mb", cache_size_bytes / (1024 * 1024))
+        The prompt is tokenized immediately so we pay that cost upfront,
+        but no forward pass happens until step() pulls it into a free slot.
 
-            # 3. Sample next token
-            next_token = sample_next_token(logits, temperature=0.8, top_p=0.95)
+        Returns:
+            The engine-internal request_id (int).
+        """
+        req_id = self.next_request_id
+        self.next_request_id += 1
 
-            # 4. Append to sequence
-            input_ids = torch.cat([input_ids, next_token], dim=1)
+        input_ids = self.tokenizer(prompt, return_tensors="pt").input_ids.to(
+            self.model.device
+        )
+        req = Request(
+            request_id=req_id,
+            prompt=prompt,
+            input_ids=input_ids,
+            max_new_tokens=max_new_tokens,
+            external_id=external_id,
+        )
+        self.pending_requests.append(req)
+        return req_id
 
-            # Append 1 to attention mask
-            if attention_mask is not None:
-                attention_mask = torch.cat(
+    def has_pending_or_active(self) -> bool:
+        """True while there is still work to do."""
+        return len(self.pending_requests) > 0 or any(
+            not s.is_free for s in self.slots
+        )
+
+    def step(self) -> List[Request]:
+        """Run one iteration of the continuous batching loop.
+
+        This method does four things:
+          1. FILL    — assign pending requests to free slots.
+          2. PREFILL — run full-prompt forward passes for newly filled slots.
+          3. DECODE  — run single-token forward passes for all active slots.
+          4. EVICT   — clear completed slots and return finished requests.
+
+        Returns:
+            A list of Request objects that completed during this step.
+        """
+        completed_this_step: List[Request] = []
+
+        # ==================================================================
+        # PHASE 1 — FILL: assign pending requests to free slots
+        # ==================================================================
+        # Walk the slot array and fill any empty slot with the next pending
+        # request.  The request is marked "active" and the slot is flagged
+        # needs_prefill so PHASE 2 knows to run a full forward pass.
+        # ==================================================================
+        for slot in self.slots:
+            if slot.is_free and self.pending_requests:
+                req = self.pending_requests.pop(0)
+                req.status = "active"
+                slot.request = req
+                slot.needs_prefill = True
+
+        # Count active slots for metrics
+        active_count = sum(1 for s in self.slots if not s.is_free)
+        if active_count == 0:
+            return completed_this_step
+
+        metrics.observe("batch_size", active_count)
+
+        # ==================================================================
+        # PHASE 2 — PREFILL: full-prompt forward pass for newly filled slots
+        # ==================================================================
+        # Each newly filled slot runs its own forward pass over the full
+        # prompt to populate its KV cache and generate its first token.
+        #
+        # The KV cache is stored directly in the Slot — shape per layer:
+        #   [1, heads, prompt_len, head_dim]
+        #
+        # No padding, no concatenation with other slots.
+        # ==================================================================
+
+        # Track which slots were prefilled THIS step so PHASE 3 can skip them
+        # (they already produced their first token here; decoding next step).
+        prefilled_this_step: set = set()
+
+        for slot in self.slots:
+            if not slot.needs_prefill:
+                continue
+
+            req = slot.request
+            with torch.no_grad():
+                metrics.start_timer("token_generation_time")
+
+                # --- Prefill forward pass ---
+                # Run the full prompt through the model to populate the
+                # slot's KV cache and obtain logits for the last prompt token.
+                prefill_mask = torch.ones(
+                    (1, req.input_ids.shape[1]),
+                    dtype=torch.long,
+                    device=self.model.device,
+                )
+                outputs = self.model(
+                    input_ids=req.input_ids,
+                    attention_mask=prefill_mask,
+                    use_cache=True,
+                )
+
+                # --- First token generation ---
+                logits = outputs.logits[:, -1, :]
+                next_token = sample_next_token(logits, temperature=0.8, top_p=0.95)
+                req.generated_tokens.append(next_token.item())
+
+                # Store KV cache and mask in the slot — this is the slot's
+                # own private cache, shape [1, heads, prompt_len, head_dim].
+                slot.kv_cache = outputs.past_key_values
+                slot.attention_mask = torch.ones(
+                    (1, req.input_ids.shape[1] + 1),  # prompt + first token
+                    dtype=torch.long,
+                    device=self.model.device,
+                )
+                slot.needs_prefill = False
+                prefilled_this_step.add(slot.slot_id)
+
+                duration = metrics.stop_timer("token_generation_time")
+                metrics.observe("time_to_first_token_ms", duration * 1000)
+
+        # ==================================================================
+        # PHASE 3 — DECODE: single-token forward pass for each active slot
+        # ==================================================================
+        # Each active slot (has a KV cache, not just prefilled) runs its own
+        # forward pass feeding only the last generated token.  The slot's
+        # private KV cache provides all prior context.
+        #
+        # We iterate over slots individually — no cross-slot padding needed.
+        # ==================================================================
+        for slot in self.slots:
+            if slot.is_free or slot.needs_prefill:
+                continue
+
+            # Skip slots that were just prefilled this step — they already
+            # generated their first token in PHASE 2.
+            if slot.slot_id in prefilled_this_step:
+                continue
+
+            req = slot.request
+            with torch.no_grad():
+                metrics.start_timer("token_generation_time")
+
+                # Feed only the last generated token — the KV cache has
+                # all prior context.
+                input_id = torch.tensor(
+                    [[req.generated_tokens[-1]]],
+                    dtype=torch.long,
+                    device=self.model.device,
+                )
+
+                outputs = self.model(
+                    input_ids=input_id,
+                    attention_mask=slot.attention_mask,
+                    past_key_values=slot.kv_cache,
+                    use_cache=True,
+                )
+
+                # Update the slot's KV cache with the new entries
+                slot.kv_cache = outputs.past_key_values
+
+                # Sample the next token
+                logits = outputs.logits[:, -1, :]
+                next_token = sample_next_token(logits, temperature=0.8, top_p=0.95)
+                req.generated_tokens.append(next_token.item())
+
+                # Extend the slot's attention mask by 1 column
+                slot.attention_mask = torch.cat(
                     [
-                        attention_mask,
+                        slot.attention_mask,
                         torch.ones(
-                            (batch_size, 1),
-                            dtype=attention_mask.dtype,
-                            device=attention_mask.device,
+                            (1, 1),
+                            dtype=torch.long,
+                            device=self.model.device,
                         ),
                     ],
                     dim=1,
                 )
 
-            duration = metrics.stop_timer("token_generation_time")
-            if i == 0:
-                metrics.observe("time_to_first_token_ms", duration * 1000)
-            else:
+                duration = metrics.stop_timer("token_generation_time")
                 metrics.observe("time_per_output_token_ms", duration * 1000)
+                metrics.inc("total_generated_tokens", 1)
 
-            metrics.inc("total_generated_tokens", batch_size)
+        # ==================================================================
+        # PHASE 4 — EVICT: clear completed slots
+        # ==================================================================
+        # A request is complete when it has generated max_new_tokens, or
+        # when its sequence length would exceed max_seq_len.
+        #
+        # The slot is fully cleared — KV cache discarded, request removed.
+        # The next pending request will start fresh in this slot on the
+        # next call to step().
+        # ==================================================================
+        for slot in self.slots:
+            if slot.is_free:
+                continue
 
-        total_duration = metrics.stop_timer("inference_total_time")
-        if total_duration > 0:
-            metrics.observe(
-                "throughput_tokens_per_sec",
-                (max_new_tokens * batch_size) / total_duration,
+            req = slot.request
+            seq_len_exceeded = (
+                slot.attention_mask is not None
+                and slot.attention_mask.shape[1] >= self.max_seq_len
             )
 
-    # Decode
-    output_strings: List[str] = []
-    for output in input_ids:
-        text = tokenizer.decode(output, skip_special_tokens=True)
-        output_strings.append(text)
+            if len(req.generated_tokens) >= req.max_new_tokens or seq_len_exceeded:
+                req.status = "completed"
+                completed_this_step.append(req)
+                # FULL RESET — this is the key fix.
+                # The slot's KV cache is discarded entirely.  The next
+                # request will start from its own prompt length.
+                slot.clear()
 
-    return output_strings
+        # ==================================================================
+        # PHASE 5 — METRICS: measure current KV cache memory footprint
+        # ==================================================================
+        # Sum across all active slots to get total KV cache memory.
+        # This should stay bounded by max_slots × max_seq_len.
+        # ==================================================================
+        cache_size_bytes = 0
+        for slot in self.slots:
+            if slot.kv_cache is not None:
+                for layer in slot.kv_cache.layers:
+                    cache_size_bytes += layer.keys.element_size() * layer.keys.nelement()
+                    cache_size_bytes += (
+                        layer.values.element_size() * layer.values.nelement()
+                    )
+        if cache_size_bytes > 0:
+            metrics.observe("kv_cache_size_mb", cache_size_bytes / (1024 * 1024))
 
-
-
+        return completed_this_step
 
 
 def sample_next_token(
