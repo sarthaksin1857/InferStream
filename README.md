@@ -55,3 +55,38 @@ UV_PUBLISH_TOKEN=<your-pypi-token> uv publish
 ```
 
 On GitHub Actions you can use [trusted publishing](https://docs.pypi.org/trusted-publishers/) (OIDC) instead of a long-lived token.
+
+## Observability & Metrics
+
+The system has a built-in observability stack powered by **OpenTelemetry**. This allows you to track inference performance, token generation latency, KV cache size, and more.
+
+You can configure metric exporters by setting the `INFERSTREAM_METRICS_EXPORTER` environment variable.
+
+### Exporter Options:
+- `inmemory` (Default): Stores metrics in process memory. Ideal for testing and single-process scripts.
+- `console`: Prints out periodic metric updates directly to `stdout`.
+- `otlp`: Forwards telemetry data over gRPC/HTTP directly to an OTEL collector.
+- `prometheus`: Spins up a Prometheus scrape endpoint on the worker node.
+
+### Visualizing with Prometheus & Grafana
+
+To scrape and visualize worker metrics using Prometheus:
+
+1. Start your worker node with the Prometheus exporter enabled:
+   ```bash
+   export INFERSTREAM_METRICS_EXPORTER=prometheus
+   export PROMETHEUS_PORT=9090
+   uv run python src/inferstream/worker/server.py
+   ```
+2. Configure your **Prometheus server** (`prometheus.yml`) to scrape the worker node endpoint:
+   ```yaml
+   scrape_configs:
+     - job_name: 'inferstream_worker'
+       scrape_interval: 5s
+       static_configs:
+         - targets: ['localhost:9090']
+   ```
+3. Connect your Prometheus data source to **Grafana** to visualize core metrics such as:
+   - `time_per_output_token_ms`: Token generation throughput latency.
+   - `kv_cache_size_mb`: Memory utilization of the continuous batching engine.
+   - `total_generated_tokens`: Total generated output volume.

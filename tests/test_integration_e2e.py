@@ -207,6 +207,7 @@ def test_e2e_distributed_inference() -> None:
         worker = _start_service(
             ["uv", "run", "python", "src/inferstream/worker/server.py"],
             "worker.log",
+            env={"INFERSTREAM_METRICS_EXPORTER": "prometheus", "PROMETHEUS_PORT": "9090"},
         )
         procs.append(worker)
 
@@ -345,6 +346,21 @@ def test_e2e_distributed_inference() -> None:
             print(f"  Latency  avg       : {sum(latencies)/len(latencies):.1f}s")
         print(f"  Log dir            : {LOG_DIR}/")
         print(f"{'='*70}\n")
+
+        print("\n" + "=" * 70)
+        print("  PROGRAMMATIC WORKER METRICS (Prometheus)")
+        print("=" * 70)
+        try:
+            # The worker runs a Prometheus scrape endpoint on port 9090
+            prom_resp = urllib.request.urlopen("http://localhost:9090/metrics", timeout=2)
+            prom_text = prom_resp.read().decode("utf-8")
+            # Just print out lines related to our core metrics
+            for line in prom_text.splitlines():
+                if "time_per_output_token_ms" in line or "kv_cache_size_mb" in line or "throughput" in line:
+                    print(f"  {line}")
+        except Exception as e:
+            print(f"  Failed to scrape worker metrics: {e}")
+        print("=" * 70 + "\n")
 
         # ===================================================================
         # ASSERTIONS
