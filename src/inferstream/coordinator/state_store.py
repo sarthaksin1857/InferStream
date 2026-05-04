@@ -76,14 +76,27 @@ class StateStore:
             return self.results.get(request_id)
         return None
 
-    async def assignWork(self, worker: coordinator_pb2.Worker) -> list:
-        """Pops a single item from the queue for testing the flow."""
+    async def assignWork(self, worker: coordinator_pb2.Worker, max_batch_size: int = 8) -> list:
+        """Pops up to max_batch_size items from the pending queue and assigns
+        them to the requesting worker.
+
+        Args:
+            worker:         The worker descriptor (currently used for logging).
+            max_batch_size: Maximum number of tasks to hand out in one call.
+                            The worker passes its number of free engine slots
+                            so we never send more work than it can handle.
+        """
         assigned_tasks = []
-        try:
-            request_id = self.pending_queue.get_nowait()
-            self.statuses[request_id] = coordinator_pb2.ASSIGNED
-            assigned_tasks.append(self.tasks.get(request_id))
-        except asyncio.QueueEmpty:
-            pass
-            
+        for _ in range(max_batch_size):
+            try:
+                request_id = self.pending_queue.get_nowait()
+                self.statuses[request_id] = coordinator_pb2.ASSIGNED
+                assigned_tasks.append(self.tasks.get(request_id))
+            except asyncio.QueueEmpty:
+                break  # No more work available right now
+
+        if assigned_tasks:
+            logger.info(
+                f"Assigned {len(assigned_tasks)} task(s) to worker {worker.worker_id}"
+            )
         return assigned_tasks

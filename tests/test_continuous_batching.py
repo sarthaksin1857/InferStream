@@ -86,13 +86,17 @@ def test_continuous_batching() -> None:
     while engine.has_pending_or_active():
         step_num += 1
 
-        active_ids_before = [r.request_id for r in engine.active_requests]
+        active_ids_before = [
+            s.request.request_id for s in engine.slots if s.request is not None
+        ]
         pending_count = len(engine.pending_requests)
 
         completed = engine.step()
         completed_requests.extend(completed)
 
-        active_ids_after = [r.request_id for r in engine.active_requests]
+        active_ids_after = [
+            s.request.request_id for s in engine.slots if s.request is not None
+        ]
 
         # Build a readable step log
         completed_ids = [r.request_id for r in completed]

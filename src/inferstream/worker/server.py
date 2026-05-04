@@ -13,11 +13,13 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Map TaskLength enum to max_new_tokens
+# Keep these small for interactive demos — each step() does one forward pass
+# per active slot, so high values multiply inference time linearly.
 LENGTH_MAPPING = {
-    coordinator_pb2.LENGTH_UNSPECIFIED: 50,
-    coordinator_pb2.SHORT: 256,
-    coordinator_pb2.MEDIUM: 1024,
-    coordinator_pb2.LONG: 2048,
+    coordinator_pb2.LENGTH_UNSPECIFIED: 30,
+    coordinator_pb2.SHORT: 50,
+    coordinator_pb2.MEDIUM: 150,
+    coordinator_pb2.LONG: 300,
 }
 
 # Maximum number of concurrent generation slots.
