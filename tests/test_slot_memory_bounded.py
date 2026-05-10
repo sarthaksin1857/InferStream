@@ -93,34 +93,22 @@ def test_slot_memory_bounded() -> None:
         # KEY ASSERTION: inspect each slot's KV cache seq_len
         # ---------------------------------------------------------------
         for slot in engine.slots:
-            if slot.kv_cache is None:
+            if slot.is_free:
                 continue
 
-            # The seq_len in the KV cache (dim=2 of the keys tensor).
-            # After prefill: prompt_len  (the input tokens)
-            # After N decode steps: prompt_len + N
-            # The last generated token hasn't been cached yet — it will
-            # be fed as input_ids on the *next* decode step.
-            kv_seq_len = slot.kv_cache.layers[0].keys.shape[2]
-            mask_len = slot.attention_mask.shape[1]
+            # The seq_len in the KV cache is tracked globally per-slot.
+            kv_seq_len = engine.global_cache.slot_seq_lens[slot.slot_id]
 
-            # The mask is always exactly 1 ahead of the KV cache:
-            # it accounts for the cached positions + the token that
-            # will be fed as input_ids on the next forward call.
-            assert mask_len == kv_seq_len + 1, (
-                f"Step {step_num}, slot {slot.slot_id}: "
-                f"mask_len ({mask_len}) != kv_seq_len + 1 ({kv_seq_len + 1})"
-            )
-
-            # The slot's total footprint (mask_len) must equal:
-            #   prompt_token_length + number of tokens generated so far
+            # The slot's KV cache covers everything EXCEPT the last generated token
+            # (which will be cached during the next decode step).
+            # So kv_seq_len + 1 must equal the expected total footprint.
             req = slot.request
             expected_total = prompt_token_lengths[req.request_id] + len(
                 req.generated_tokens
             )
-            assert mask_len == expected_total, (
+            assert kv_seq_len + 1 == expected_total, (
                 f"Step {step_num}, slot {slot.slot_id}: "
-                f"mask_len ({mask_len}) != expected ({expected_total}) "
+                f"kv_seq_len + 1 ({kv_seq_len + 1}) != expected ({expected_total}) "
                 f"[prompt={prompt_token_lengths[req.request_id]}, "
                 f"generated={len(req.generated_tokens)}]"
             )
