@@ -54,16 +54,19 @@ class Slot:
         self.needs_prefill = False
 
 
+from transformers.cache_utils import DynamicCache
+
 # ---------------------------------------------------------------------------
 # StaticSlotCache
 # ---------------------------------------------------------------------------
-class StaticSlotCache(Cache):
+class StaticSlotCache(DynamicCache):
     """
     A custom Cache that pre-allocates KV memory for a fixed number of slots
     and allows batched decoding across a subset of active slots without padding
     the storage tensor.
     """
     def __init__(self, config, max_slots: int, max_seq_len: int, device: torch.device, dtype: torch.dtype):
+        super().__init__()
         self.max_slots = max_slots
         self.max_seq_len = max_seq_len
         self.num_hidden_layers = config.num_hidden_layers
@@ -90,9 +93,7 @@ class StaticSlotCache(Cache):
         self.active_slots: List[int] = []
         self.slot_seq_lens: Dict[int, int] = {i: 0 for i in range(max_slots)}
         
-        # Dummy layers list to satisfy transformers internal checks
-        self.layers = [None] * self.num_hidden_layers
-
+        # Dummy layers removed.
     def update(
         self,
         key_states: torch.Tensor,
@@ -126,13 +127,6 @@ class StaticSlotCache(Cache):
             return 0
         return max(self.slot_seq_lens[s] for s in self.active_slots)
 
-    def get_max_cache_shape(self, layer_idx: int = 0) -> int:
-        return self.max_seq_len
-        
-    def get_mask_sizes(self, query_length: int, layer_idx: int) -> tuple[int, int]:
-        seq_len = self.get_seq_length(layer_idx)
-        # return kv_length, kv_offset
-        return seq_len + query_length, seq_len
 
 
 # ---------------------------------------------------------------------------
@@ -177,9 +171,19 @@ class ContinuousBatchingEngine:
         req_id = self.next_request_id
         self.next_request_id += 1
 
-        input_ids = self.tokenizer(prompt, return_tensors="pt").input_ids.to(
-            self.model.device
-        )
+        if getattr(self.tokenizer, "chat_template", None) is not None:
+            # Format as a conversation if a chat template is available
+            messages = [{"role": "user", "content": prompt}]
+            input_ids = self.tokenizer.apply_chat_template(
+                messages, 
+                add_generation_prompt=True, 
+                return_dict=True,
+                return_tensors="pt"
+            ).input_ids.to(self.model.device)
+        else:
+            input_ids = self.tokenizer(prompt, return_tensors="pt").input_ids.to(
+                self.model.device
+            )
         req = Request(
             request_id=req_id,
             prompt=prompt,
