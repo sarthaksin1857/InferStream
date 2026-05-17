@@ -11,7 +11,8 @@ from inferstream.grpc.generated.inferstream.v1 import coordinator_pb2_grpc
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    app.state.channel = grpc.aio.insecure_channel("localhost:50051")
+    coordinator_addr = os.environ.get("COORDINATOR_ADDR", "localhost:50051")
+    app.state.channel = grpc.aio.insecure_channel(coordinator_addr)
     app.state.stub = coordinator_pb2_grpc.CoordinatorServiceStub(app.state.channel)
     yield
     await app.state.channel.close()
@@ -94,7 +95,14 @@ async def get_status(request: Request):
 
 def main():
     import uvicorn
-    uvicorn.run("inferstream.frontend.server:app", host="0.0.0.0", port=8000, reload=True)
+    import argparse
+    parser = argparse.ArgumentParser(description="InferStream Frontend Server")
+    parser.add_argument("--coordinator", type=str, default="localhost:50051",
+                        help="gRPC address of the coordinator (default: localhost:50051)")
+    parser.add_argument("--port", type=int, default=8000, help="HTTP port to listen on")
+    args = parser.parse_args()
+    os.environ.setdefault("COORDINATOR_ADDR", args.coordinator)
+    uvicorn.run("inferstream.frontend.server:app", host="0.0.0.0", port=args.port, reload=True)
 
 if __name__ == "__main__":
     main()

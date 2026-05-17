@@ -1,6 +1,7 @@
 import argparse
 import asyncio
 import logging
+import socket
 import uuid
 import grpc
 import torch
@@ -31,6 +32,27 @@ async def heartbeat_loop(stub, worker_id):
         except Exception as e:
             logger.error(f"Heartbeat failed: {e}")
         await asyncio.sleep(5.0)
+
+def resolve_coordinator_addr(addr: str) -> str:
+    """Pre-resolve the coordinator address using the OS resolver.
+
+    gRPC's built-in resolver does not honour mDNS (.local hostnames used by
+    Bonjour/Avahi).  Python's socket module *does* go through the OS resolver
+    (including mDNS on macOS / systemd-resolved on Linux), so we resolve the
+    hostname here and substitute the raw IP before handing the address to gRPC.
+    """
+    if ":" not in addr:
+        return addr  # no port — leave as-is
+    host, port = addr.rsplit(":", 1)
+    try:
+        resolved_ip = socket.getaddrinfo(host, None, socket.AF_UNSPEC, socket.SOCK_STREAM)[0][4][0]
+        if resolved_ip != host:
+            logger.info(f"Resolved '{host}' → '{resolved_ip}' (mDNS/DNS)")
+        return f"{resolved_ip}:{port}"
+    except socket.gaierror as e:
+        logger.warning(f"Could not resolve '{host}': {e} — using address as-is")
+        return addr
+
 
 async def run_worker(
     coordinator_addr: str = "localhost:50051",
@@ -90,9 +112,12 @@ async def run_worker(
 
     # 2. Connect to Coordinator
     worker_id = str(uuid.uuid4())
-    
+
+    # Pre-resolve the address so gRPC doesn't have to deal with mDNS (.local).
+    resolved_addr = resolve_coordinator_addr(coordinator_addr)
+
     # We use an async channel
-    async with grpc.aio.insecure_channel(coordinator_addr) as channel:
+    async with grpc.aio.insecure_channel(resolved_addr) as channel:
         stub = coordinator_pb2_grpc.CoordinatorServiceStub(channel)
         
         # 3. Register Worker

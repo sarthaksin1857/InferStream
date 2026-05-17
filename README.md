@@ -46,27 +46,36 @@ You can run the lightweight Coordinator and Frontend on a low-power device like 
 
 1. **On the Raspberry Pi (Coordinator + Frontend)**:
    Ensure you have a 64-bit OS installed (like Raspberry Pi OS Lite 64-bit) to support Python dependencies.
-   Start the coordinator and frontend:
+   Use the combined launcher to start both services together — **Ctrl+C tears them both down**:
    ```bash
-   uv run inferstream-coordinator &
-   uv run inferstream-frontend &
+   uv run inferstream-serve
+   ```
+   You can also specify ports if needed:
+   ```bash
+   uv run inferstream-serve --coordinator-port 50051 --frontend-port 8000
    ```
    *Note: Both services bind to `0.0.0.0` by default, so they are automatically accessible on your local network.*
 
 2. **On your MacBook (Worker)**:
-   Point the worker to your Raspberry Pi's local network hostname (or IP address) and set strict memory limits to protect your host machine from crashing:
+   Point the worker at the Pi using either its IP address or mDNS hostname.
    ```bash
-   uv run python src/inferstream/worker/server.py \
-       --coordinator raspberrypi.local:50051 \
-       --model meta-llama/Llama-3.1-8B-Instruct \
-       --max-ram-gb 36.0 \
-       --max-batch-size 16 \
-       --max-seq-len 4096
+   uv run inferstream-worker \
+       --coordinator 10.107.8.126:50051 \
+       --model Qwen/Qwen2.5-3B-Instruct \
+       --max-ram-gb 16.0 \
+       --max-batch-size 8 \
+       --max-seq-len 2048
    ```
+   You can also use the mDNS hostname (`pi.local:50051`) directly — the worker automatically pre-resolves it via the OS before handing the address to gRPC:
+   ```bash
+   uv run inferstream-worker --coordinator pi.local:50051
+   ```
+   > **Why not just use `pi.local` everywhere?** `.local` hostnames are resolved via **mDNS** (Bonjour/Avahi), not standard DNS. Your browser and `ping` support mDNS natively, but gRPC's internal resolver does not. InferStream works around this by resolving the hostname through Python's `socket` module (which honours the OS mDNS stack) before creating the gRPC channel.
+
    *Note: If you use a gated model like Llama 3.1, you must first authenticate by running `uv run huggingface-cli login`.*
 
 3. **Accessing the UI**:
-   Open `http://raspberrypi.local:8000` in your MacBook's browser to access the chat interface.
+   Open `http://pi.local:8000` (or `http://10.107.8.126:8000`) in your MacBook's browser to access the chat interface.
 
 ## Commands & Testing
 

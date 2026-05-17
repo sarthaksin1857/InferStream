@@ -27,6 +27,7 @@ dependencies = [
 inferstream = "inferstream.cli:main"
 inferstream-coordinator = "inferstream.coordinator.server:main"
 inferstream-frontend = "inferstream.frontend.server:main"
+inferstream-serve = "inferstream.serve:main"
 
 [dependency-groups]
 dev = [
