@@ -24,45 +24,49 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n inferstream/v1/coordinator.proto\x12\x0einferstream.v1\"Q\n\x13InferenceParameters\x12\x0e\n\x06prompt\x18\x01 \x01(\t\x12*\n\x06length\x18\x02 \x01(\x0e\x32\x1a.inferstream.v1.TaskLength\"K\n\x10SubmitRequestReq\x12\x37\n\nparameters\x18\x01 \x01(\x0b\x32#.inferstream.v1.InferenceParameters\"&\n\x10SubmitRequestRes\x12\x12\n\nrequest_id\x18\x01 \x01(\t\"\"\n\x0cGetResultReq\x12\x12\n\nrequest_id\x18\x01 \x01(\t\"U\n\x0cGetResultRes\x12-\n\x06status\x18\x01 \x01(\x0e\x32\x1d.inferstream.v1.RequestStatus\x12\x16\n\x0egenerated_text\x18\x02 \x01(\t\";\n\x11RegisterWorkerReq\x12&\n\x06worker\x18\x01 \x01(\x0b\x32\x16.inferstream.v1.Worker\"8\n\x06Worker\x12\x11\n\tworker_id\x18\x01 \x01(\t\x12\x1b\n\x13maxMemoryAssignment\x18\x02 \x01(\x03\"$\n\x11RegisterWorkerRes\x12\x0f\n\x07success\x18\x01 \x01(\x08\"7\n\nGetWorkReq\x12\x11\n\tworker_id\x18\x01 \x01(\t\x12\x16\n\x0emax_batch_size\x18\x02 \x01(\x05\"\\\n\rInferenceTask\x12\x12\n\nrequest_id\x18\x01 \x01(\t\x12\x37\n\nparameters\x18\x02 \x01(\x0b\x32#.inferstream.v1.InferenceParameters\":\n\nGetWorkRes\x12,\n\x05tasks\x18\x01 \x03(\x0b\x32\x1d.inferstream.v1.InferenceTask\"=\n\x0fInferenceResult\x12\x12\n\nrequest_id\x18\x01 \x01(\t\x12\x16\n\x0egenerated_text\x18\x02 \x01(\t\"W\n\x10SubmitResultsReq\x12\x11\n\tworker_id\x18\x01 \x01(\t\x12\x30\n\x07results\x18\x02 \x03(\x0b\x32\x1f.inferstream.v1.InferenceResult\"#\n\x10SubmitResultsRes\x12\x0f\n\x07success\x18\x01 \x01(\x08*E\n\nTaskLength\x12\x16\n\x12LENGTH_UNSPECIFIED\x10\x00\x12\t\n\x05SHORT\x10\x01\x12\n\n\x06MEDIUM\x10\x02\x12\x08\n\x04LONG\x10\x03*E\n\rRequestStatus\x12\x0b\n\x07PENDING\x10\x00\x12\r\n\tCOMPLETED\x10\x01\x12\n\n\x06\x46\x41ILED\x10\x02\x12\x0c\n\x08\x41SSIGNED\x10\x03\x32\xa2\x03\n\x12\x43oordinatorService\x12S\n\rSubmitRequest\x12 .inferstream.v1.SubmitRequestReq\x1a .inferstream.v1.SubmitRequestRes\x12G\n\tGetResult\x12\x1c.inferstream.v1.GetResultReq\x1a\x1c.inferstream.v1.GetResultRes\x12V\n\x0eRegisterWorker\x12!.inferstream.v1.RegisterWorkerReq\x1a!.inferstream.v1.RegisterWorkerRes\x12\x41\n\x07GetWork\x12\x1a.inferstream.v1.GetWorkReq\x1a\x1a.inferstream.v1.GetWorkRes\x12S\n\rSubmitResults\x12 .inferstream.v1.SubmitResultsReq\x1a .inferstream.v1.SubmitResultsResb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n inferstream/v1/coordinator.proto\x12\x0einferstream.v1\"e\n\x13InferenceParameters\x12\x0e\n\x06prompt\x18\x01 \x01(\t\x12*\n\x06length\x18\x02 \x01(\x0e\x32\x1a.inferstream.v1.TaskLength\x12\x12\n\nmodel_name\x18\x03 \x01(\t\"K\n\x10SubmitRequestReq\x12\x37\n\nparameters\x18\x01 \x01(\x0b\x32#.inferstream.v1.InferenceParameters\"&\n\x10SubmitRequestRes\x12\x12\n\nrequest_id\x18\x01 \x01(\t\"\"\n\x0cGetResultReq\x12\x12\n\nrequest_id\x18\x01 \x01(\t\"U\n\x0cGetResultRes\x12-\n\x06status\x18\x01 \x01(\x0e\x32\x1d.inferstream.v1.RequestStatus\x12\x16\n\x0egenerated_text\x18\x02 \x01(\t\";\n\x11RegisterWorkerReq\x12&\n\x06worker\x18\x01 \x01(\x0b\x32\x16.inferstream.v1.Worker\"L\n\x06Worker\x12\x11\n\tworker_id\x18\x01 \x01(\t\x12\x1b\n\x13maxMemoryAssignment\x18\x02 \x01(\x03\x12\x12\n\nmodel_name\x18\x03 \x01(\t\"$\n\x11RegisterWorkerRes\x12\x0f\n\x07success\x18\x01 \x01(\x08\"\x14\n\x12GetSystemStatusReq\"=\n\x12GetSystemStatusRes\x12\'\n\x07workers\x18\x01 \x03(\x0b\x32\x16.inferstream.v1.Worker\"7\n\nGetWorkReq\x12\x11\n\tworker_id\x18\x01 \x01(\t\x12\x16\n\x0emax_batch_size\x18\x02 \x01(\x05\"\\\n\rInferenceTask\x12\x12\n\nrequest_id\x18\x01 \x01(\t\x12\x37\n\nparameters\x18\x02 \x01(\x0b\x32#.inferstream.v1.InferenceParameters\":\n\nGetWorkRes\x12,\n\x05tasks\x18\x01 \x03(\x0b\x32\x1d.inferstream.v1.InferenceTask\"=\n\x0fInferenceResult\x12\x12\n\nrequest_id\x18\x01 \x01(\t\x12\x16\n\x0egenerated_text\x18\x02 \x01(\t\"W\n\x10SubmitResultsReq\x12\x11\n\tworker_id\x18\x01 \x01(\t\x12\x30\n\x07results\x18\x02 \x03(\x0b\x32\x1f.inferstream.v1.InferenceResult\"#\n\x10SubmitResultsRes\x12\x0f\n\x07success\x18\x01 \x01(\x08*E\n\nTaskLength\x12\x16\n\x12LENGTH_UNSPECIFIED\x10\x00\x12\t\n\x05SHORT\x10\x01\x12\n\n\x06MEDIUM\x10\x02\x12\x08\n\x04LONG\x10\x03*E\n\rRequestStatus\x12\x0b\n\x07PENDING\x10\x00\x12\r\n\tCOMPLETED\x10\x01\x12\n\n\x06\x46\x41ILED\x10\x02\x12\x0c\n\x08\x41SSIGNED\x10\x03\x32\xfd\x03\n\x12\x43oordinatorService\x12S\n\rSubmitRequest\x12 .inferstream.v1.SubmitRequestReq\x1a .inferstream.v1.SubmitRequestRes\x12G\n\tGetResult\x12\x1c.inferstream.v1.GetResultReq\x1a\x1c.inferstream.v1.GetResultRes\x12V\n\x0eRegisterWorker\x12!.inferstream.v1.RegisterWorkerReq\x1a!.inferstream.v1.RegisterWorkerRes\x12Y\n\x0fGetSystemStatus\x12\".inferstream.v1.GetSystemStatusReq\x1a\".inferstream.v1.GetSystemStatusRes\x12\x41\n\x07GetWork\x12\x1a.inferstream.v1.GetWorkReq\x1a\x1a.inferstream.v1.GetWorkRes\x12S\n\rSubmitResults\x12 .inferstream.v1.SubmitResultsReq\x1a .inferstream.v1.SubmitResultsResb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'inferstream.v1.coordinator_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
-  _globals['_TASKLENGTH']._serialized_start=932
-  _globals['_TASKLENGTH']._serialized_end=1001
-  _globals['_REQUESTSTATUS']._serialized_start=1003
-  _globals['_REQUESTSTATUS']._serialized_end=1072
+  _globals['_TASKLENGTH']._serialized_start=1057
+  _globals['_TASKLENGTH']._serialized_end=1126
+  _globals['_REQUESTSTATUS']._serialized_start=1128
+  _globals['_REQUESTSTATUS']._serialized_end=1197
   _globals['_INFERENCEPARAMETERS']._serialized_start=52
-  _globals['_INFERENCEPARAMETERS']._serialized_end=133
-  _globals['_SUBMITREQUESTREQ']._serialized_start=135
-  _globals['_SUBMITREQUESTREQ']._serialized_end=210
-  _globals['_SUBMITREQUESTRES']._serialized_start=212
-  _globals['_SUBMITREQUESTRES']._serialized_end=250
-  _globals['_GETRESULTREQ']._serialized_start=252
-  _globals['_GETRESULTREQ']._serialized_end=286
-  _globals['_GETRESULTRES']._serialized_start=288
-  _globals['_GETRESULTRES']._serialized_end=373
-  _globals['_REGISTERWORKERREQ']._serialized_start=375
-  _globals['_REGISTERWORKERREQ']._serialized_end=434
-  _globals['_WORKER']._serialized_start=436
-  _globals['_WORKER']._serialized_end=492
-  _globals['_REGISTERWORKERRES']._serialized_start=494
-  _globals['_REGISTERWORKERRES']._serialized_end=530
-  _globals['_GETWORKREQ']._serialized_start=532
-  _globals['_GETWORKREQ']._serialized_end=587
-  _globals['_INFERENCETASK']._serialized_start=589
-  _globals['_INFERENCETASK']._serialized_end=681
-  _globals['_GETWORKRES']._serialized_start=683
-  _globals['_GETWORKRES']._serialized_end=741
-  _globals['_INFERENCERESULT']._serialized_start=743
-  _globals['_INFERENCERESULT']._serialized_end=804
-  _globals['_SUBMITRESULTSREQ']._serialized_start=806
-  _globals['_SUBMITRESULTSREQ']._serialized_end=893
-  _globals['_SUBMITRESULTSRES']._serialized_start=895
-  _globals['_SUBMITRESULTSRES']._serialized_end=930
-  _globals['_COORDINATORSERVICE']._serialized_start=1075
-  _globals['_COORDINATORSERVICE']._serialized_end=1493
+  _globals['_INFERENCEPARAMETERS']._serialized_end=153
+  _globals['_SUBMITREQUESTREQ']._serialized_start=155
+  _globals['_SUBMITREQUESTREQ']._serialized_end=230
+  _globals['_SUBMITREQUESTRES']._serialized_start=232
+  _globals['_SUBMITREQUESTRES']._serialized_end=270
+  _globals['_GETRESULTREQ']._serialized_start=272
+  _globals['_GETRESULTREQ']._serialized_end=306
+  _globals['_GETRESULTRES']._serialized_start=308
+  _globals['_GETRESULTRES']._serialized_end=393
+  _globals['_REGISTERWORKERREQ']._serialized_start=395
+  _globals['_REGISTERWORKERREQ']._serialized_end=454
+  _globals['_WORKER']._serialized_start=456
+  _globals['_WORKER']._serialized_end=532
+  _globals['_REGISTERWORKERRES']._serialized_start=534
+  _globals['_REGISTERWORKERRES']._serialized_end=570
+  _globals['_GETSYSTEMSTATUSREQ']._serialized_start=572
+  _globals['_GETSYSTEMSTATUSREQ']._serialized_end=592
+  _globals['_GETSYSTEMSTATUSRES']._serialized_start=594
+  _globals['_GETSYSTEMSTATUSRES']._serialized_end=655
+  _globals['_GETWORKREQ']._serialized_start=657
+  _globals['_GETWORKREQ']._serialized_end=712
+  _globals['_INFERENCETASK']._serialized_start=714
+  _globals['_INFERENCETASK']._serialized_end=806
+  _globals['_GETWORKRES']._serialized_start=808
+  _globals['_GETWORKRES']._serialized_end=866
+  _globals['_INFERENCERESULT']._serialized_start=868
+  _globals['_INFERENCERESULT']._serialized_end=929
+  _globals['_SUBMITRESULTSREQ']._serialized_start=931
+  _globals['_SUBMITRESULTSREQ']._serialized_end=1018
+  _globals['_SUBMITRESULTSRES']._serialized_start=1020
+  _globals['_SUBMITRESULTSRES']._serialized_end=1055
+  _globals['_COORDINATORSERVICE']._serialized_start=1200
+  _globals['_COORDINATORSERVICE']._serialized_end=1709
 # @@protoc_insertion_point(module_scope)

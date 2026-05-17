@@ -28,13 +28,17 @@ class StateStore:
         self.results: Dict[str, str] = {}
         # Single queue for all pending requests
         self.pending_queue: asyncio.Queue = asyncio.Queue()
-        # Set of registered worker IDs
-        self.workers: Set[str] = set()
+        # Maps worker_id -> Worker object
+        self.workers: Dict[str, coordinator_pb2.Worker] = {}
 
-    def register_worker(self, worker_id: str) -> None:
+    def register_worker(self, worker: coordinator_pb2.Worker) -> None:
         """Registers a worker with the state store."""
-        self.workers.add(worker_id)
-        logger.info(f"Registered worker {worker_id} in state store")
+        self.workers[worker.worker_id] = worker
+        logger.info(f"Registered worker {worker.worker_id} in state store (model: {worker.model_name})")
+
+    def get_workers(self) -> list[coordinator_pb2.Worker]:
+        """Returns the list of all registered workers."""
+        return list(self.workers.values())
 
     async def register_job(self, request_id: str, task_data: Any) -> None:
         """Adds a request_id into all our states, puts it in the queue."""

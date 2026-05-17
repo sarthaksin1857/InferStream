@@ -73,8 +73,16 @@ class CoordinatorServiceServicer(coordinator_pb2_grpc.CoordinatorServiceServicer
         context: grpc.aio.ServicerContext,
     ) -> coordinator_pb2.RegisterWorkerRes:
         logger.info(f"Received RegisterWorker: worker_id={request.worker.worker_id}")
-        self.state_store.register_worker(request.worker.worker_id)
+        self.state_store.register_worker(request.worker)
         return coordinator_pb2.RegisterWorkerRes(success=True)
+
+    async def GetSystemStatus(
+        self,
+        request: coordinator_pb2.GetSystemStatusReq,
+        context: grpc.aio.ServicerContext,
+    ) -> coordinator_pb2.GetSystemStatusRes:
+        workers = self.state_store.get_workers()
+        return coordinator_pb2.GetSystemStatusRes(workers=workers)
 
     async def GetWork(
         self, request: coordinator_pb2.GetWorkReq, context: grpc.aio.ServicerContext

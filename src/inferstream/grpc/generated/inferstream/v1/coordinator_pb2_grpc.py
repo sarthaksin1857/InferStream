@@ -53,6 +53,11 @@ class CoordinatorServiceStub(object):
                 request_serializer=inferstream_dot_v1_dot_coordinator__pb2.RegisterWorkerReq.SerializeToString,
                 response_deserializer=inferstream_dot_v1_dot_coordinator__pb2.RegisterWorkerRes.FromString,
                 _registered_method=True)
+        self.GetSystemStatus = channel.unary_unary(
+                '/inferstream.v1.CoordinatorService/GetSystemStatus',
+                request_serializer=inferstream_dot_v1_dot_coordinator__pb2.GetSystemStatusReq.SerializeToString,
+                response_deserializer=inferstream_dot_v1_dot_coordinator__pb2.GetSystemStatusRes.FromString,
+                _registered_method=True)
         self.GetWork = channel.unary_unary(
                 '/inferstream.v1.CoordinatorService/GetWork',
                 request_serializer=inferstream_dot_v1_dot_coordinator__pb2.GetWorkReq.SerializeToString,
@@ -97,6 +102,13 @@ class CoordinatorServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def GetSystemStatus(self, request, context):
+        """Get system status (e.g., connected workers)
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def GetWork(self, request, context):
         """Worker polls for a batch of pending requests.
         """
@@ -128,6 +140,11 @@ def add_CoordinatorServiceServicer_to_server(servicer, server):
                     servicer.RegisterWorker,
                     request_deserializer=inferstream_dot_v1_dot_coordinator__pb2.RegisterWorkerReq.FromString,
                     response_serializer=inferstream_dot_v1_dot_coordinator__pb2.RegisterWorkerRes.SerializeToString,
+            ),
+            'GetSystemStatus': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetSystemStatus,
+                    request_deserializer=inferstream_dot_v1_dot_coordinator__pb2.GetSystemStatusReq.FromString,
+                    response_serializer=inferstream_dot_v1_dot_coordinator__pb2.GetSystemStatusRes.SerializeToString,
             ),
             'GetWork': grpc.unary_unary_rpc_method_handler(
                     servicer.GetWork,
@@ -225,6 +242,33 @@ class CoordinatorService(object):
             '/inferstream.v1.CoordinatorService/RegisterWorker',
             inferstream_dot_v1_dot_coordinator__pb2.RegisterWorkerReq.SerializeToString,
             inferstream_dot_v1_dot_coordinator__pb2.RegisterWorkerRes.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetSystemStatus(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/inferstream.v1.CoordinatorService/GetSystemStatus',
+            inferstream_dot_v1_dot_coordinator__pb2.GetSystemStatusReq.SerializeToString,
+            inferstream_dot_v1_dot_coordinator__pb2.GetSystemStatusRes.FromString,
             options,
             channel_credentials,
             insecure,

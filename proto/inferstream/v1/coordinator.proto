@@ -21,6 +21,9 @@ service CoordinatorService {
   // Register a new worker node with the coordinator.
   rpc RegisterWorker(RegisterWorkerReq) returns (RegisterWorkerRes);
   
+  // Get system status (e.g., connected workers)
+  rpc GetSystemStatus(GetSystemStatusReq) returns (GetSystemStatusRes);
+  
   // Worker polls for a batch of pending requests.
   rpc GetWork(GetWorkReq) returns (GetWorkRes);
   
@@ -40,6 +43,7 @@ enum TaskLength {
 message InferenceParameters {
   string prompt = 1;
   TaskLength length = 2;
+  string model_name = 3;
 }
 
 // --- Submit Request ---
@@ -77,10 +81,18 @@ message RegisterWorkerReq {
 message Worker {
   string worker_id = 1;
   int64 maxMemoryAssignment = 2; 
+  string model_name = 3;
 }
 
 message RegisterWorkerRes {
   bool success = 1;
+}
+
+// --- Get System Status ---
+message GetSystemStatusReq {}
+
+message GetSystemStatusRes {
+  repeated Worker workers = 1;
 }
 
 // --- Get Work ---

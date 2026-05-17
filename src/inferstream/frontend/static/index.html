@@ -220,11 +220,15 @@
 <div class="chat-container">
     <div class="header">
         <h1>InferStream</h1>
+        <span id="worker-status" style="margin-left: auto; font-size: 0.9rem; color: var(--text-muted);">Connected Workers: 0</span>
     </div>
     <div class="messages" id="messages">
         <div class="message bot">Welcome to InferStream! Ask me anything.</div>
     </div>
     <div class="input-area">
+        <select id="model-select" title="Model">
+            <option value="">No models available</option>
+        </select>
         <select id="length-select" title="Output Length">
             <option value="short">Short</option>
             <option value="medium">Medium</option>
@@ -240,6 +244,8 @@
     const inputEl = document.getElementById('prompt-input');
     const sendBtn = document.getElementById('send-btn');
     const lengthSelectEl = document.getElementById('length-select');
+    const modelSelectEl = document.getElementById('model-select');
+    const workerStatusEl = document.getElementById('worker-status');
 
     let isPolling = false;
 
@@ -258,6 +264,48 @@
         messagesEl.scrollTop = messagesEl.scrollHeight;
         return msgDiv;
     }
+
+    async function pollSystemStatus() {
+        try {
+            const res = await fetch('/api/status');
+            const data = await res.json();
+            
+            const workers = data.workers || [];
+            workerStatusEl.textContent = `Connected Workers: ${workers.length}`;
+            
+            // Extract unique models
+            const models = new Set();
+            workers.forEach(w => {
+                if (w.model_name) models.add(w.model_name);
+            });
+            
+            const currentSelected = modelSelectEl.value;
+            modelSelectEl.innerHTML = '';
+            
+            if (models.size === 0) {
+                const opt = document.createElement('option');
+                opt.value = "";
+                opt.textContent = "No models available";
+                modelSelectEl.appendChild(opt);
+            } else {
+                models.forEach(model => {
+                    const opt = document.createElement('option');
+                    opt.value = model;
+                    opt.textContent = model;
+                    modelSelectEl.appendChild(opt);
+                });
+                if (models.has(currentSelected)) {
+                    modelSelectEl.value = currentSelected;
+                }
+            }
+        } catch (err) {
+            console.error('Failed to poll system status:', err);
+        }
+    }
+
+    // Poll every 5 seconds
+    setInterval(pollSystemStatus, 5000);
+    pollSystemStatus(); // initial poll
 
     async function pollResult(requestId, loadingId) {
         try {
@@ -313,7 +361,11 @@
             const res = await fetch('/api/generate', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ prompt: prompt, length: lengthSelectEl.value })
+                body: JSON.stringify({ 
+                    prompt: prompt, 
+                    length: lengthSelectEl.value,
+                    model_name: modelSelectEl.value
+                })
             });
             const data = await res.json();
             

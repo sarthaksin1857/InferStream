@@ -64,7 +64,8 @@ async def run_worker():
         register_req = coordinator_pb2.RegisterWorkerReq(
             worker=coordinator_pb2.Worker(
                 worker_id=worker_id,
-                maxMemoryAssignment=8000 # Dummy value for now
+                maxMemoryAssignment=8000, # Dummy value for now
+                model_name=model_name
             )
         )
         res = await stub.RegisterWorker(register_req)
