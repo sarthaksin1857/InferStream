@@ -60,8 +60,7 @@ You can run the lightweight Coordinator and Frontend on a low-power device like 
    Point the worker at the Pi using either its IP address or mDNS hostname.
    ```bash
    uv run inferstream-worker \
-       --coordinator 10.107.8.126:50051 \
-       --model Qwen/Qwen2.5-3B-Instruct \
+       --coordinator pi.local:50051 \
        --max-ram-gb 16.0 \
        --max-batch-size 8 \
        --max-seq-len 2048
