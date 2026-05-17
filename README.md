@@ -25,18 +25,21 @@ It consists of three main components:
 
 ## Running the Distributed System
 
-To spin up the full distributed system locally (Coordinator, Frontend UI, and Worker Node), you can use the provided convenience script:
+### Single Machine (local development)
 
+Spin up the Coordinator and Frontend together with Ctrl+C support:
 ```bash
-./scripts/start_all.sh
+uv run inferstream-serve
 ```
 
-You can optionally specify a Hugging Face model to load (defaults to `Qwen/Qwen2.5-3B-Instruct`):
+Then start a worker in a separate terminal:
 ```bash
-./scripts/start_all.sh --model meta-llama/Llama-3.1-8B-Instruct
-```
+# Quick test with a tiny model (~300 MB)
+uv run inferstream-worker --model distilgpt2 --max-ram-gb 2.0
 
-This will boot all three services in the correct order in the background. It will automatically shut them all down cleanly when you press `Ctrl+C`.
+# Larger model for real workloads
+uv run inferstream-worker --model Qwen/Qwen2.5-3B-Instruct --max-ram-gb 16.0
+```
 
 Once running, open `http://localhost:8000/` in your browser to interact with the UI.
 
@@ -46,39 +49,74 @@ You can run the lightweight Coordinator and Frontend on a low-power device like 
 
 1. **On the Raspberry Pi (Coordinator + Frontend)**:
    Ensure you have a 64-bit OS installed (like Raspberry Pi OS Lite 64-bit) to support Python dependencies.
-   Use the combined launcher to start both services together — **Ctrl+C tears them both down**:
+   Use the combined launcher — **Ctrl+C tears both services down cleanly**:
    ```bash
    uv run inferstream-serve
-   ```
-   You can also specify ports if needed:
-   ```bash
+   # or with explicit ports:
    uv run inferstream-serve --coordinator-port 50051 --frontend-port 8000
    ```
-   *Note: Both services bind to `0.0.0.0` by default, so they are automatically accessible on your local network.*
+   *Both services bind to `0.0.0.0` by default, so they are accessible on your local network.*
 
 2. **On your MacBook (Worker)**:
-   Point the worker at the Pi using either its IP address or mDNS hostname.
+   Point the worker at the Pi using its IP address or mDNS hostname:
+   ```bash
+   # Using IP (most reliable)
+   uv run inferstream-worker --coordinator 10.107.8.126:50051
+
+   # Using mDNS hostname (also works — resolved automatically by InferStream)
+   uv run inferstream-worker --coordinator pi.local:50051
+   ```
+   Full options example:
    ```bash
    uv run inferstream-worker \
        --coordinator pi.local:50051 \
-       --max-ram-gb 16.0 \
+       --model Qwen/Qwen2.5-0.5B-Instruct \
+       --max-ram-gb 8.0 \
        --max-batch-size 8 \
        --max-seq-len 2048
    ```
-   You can also use the mDNS hostname (`pi.local:50051`) directly — the worker automatically pre-resolves it via the OS before handing the address to gRPC:
-   ```bash
-   uv run inferstream-worker --coordinator pi.local:50051
-   ```
-   > **Why not just use `pi.local` everywhere?** `.local` hostnames are resolved via **mDNS** (Bonjour/Avahi), not standard DNS. Your browser and `ping` support mDNS natively, but gRPC's internal resolver does not. InferStream works around this by resolving the hostname through Python's `socket` module (which honours the OS mDNS stack) before creating the gRPC channel.
+   > **mDNS & gRPC**: `.local` hostnames use mDNS (Bonjour/Avahi) which gRPC's internal resolver does not support. InferStream automatically pre-resolves the hostname via the OS (which does support mDNS) before creating the gRPC channel, so both IPv4 and IPv6 results are handled correctly.
 
-   *Note: If you use a gated model like Llama 3.1, you must first authenticate by running `uv run huggingface-cli login`.*
+   *Note: For gated models (e.g. Llama 3.1), first run `uv run huggingface-cli login`.*
 
 3. **Accessing the UI**:
-   Open `http://pi.local:8000` (or `http://10.107.8.126:8000`) in your MacBook's browser to access the chat interface.
+   Open `http://pi.local:8000` in your MacBook's browser.
+
+## CLI Reference
+
+All commands are registered as package entry points and available via `uv run <command>`:
+
+| Command | Description |
+|---|---|
+| `inferstream-serve` | Launch coordinator + frontend together (Ctrl+C stops both) |
+| `inferstream-coordinator` | Start only the gRPC coordinator |
+| `inferstream-frontend` | Start only the HTTP frontend |
+| `inferstream-worker` | Start a worker node (connect to coordinator via `--coordinator`) |
+
+### `inferstream-serve` options
+| Flag | Default | Description |
+|---|---|---|
+| `--coordinator-port` | `50051` | gRPC port for the coordinator |
+| `--frontend-port` | `8000` | HTTP port for the frontend UI |
+
+### `inferstream-frontend` options
+| Flag | Default | Description |
+|---|---|---|
+| `--coordinator` | `localhost:50051` | Coordinator address (also via `COORDINATOR_ADDR` env var) |
+| `--port` | `8000` | HTTP port to listen on |
+
+### `inferstream-worker` options
+| Flag | Default | Description |
+|---|---|---|
+| `--coordinator` | `localhost:50051` | Coordinator address (supports IP, hostname, or mDNS `.local`) |
+| `--model` | `Qwen/Qwen2.5-3B-Instruct` | Hugging Face model to load |
+| `--max-ram-gb` | `16.0` | RAM budget in GB (worker aborts if model + KV cache exceeds this) |
+| `--max-batch-size` | `8` | Max concurrent inference slots |
+| `--max-seq-len` | `2048` | Max sequence length per slot |
 
 ## Commands & Testing
 
-You can run the core inference engine locally without starting the distributed servers by running the standalone demo test:
+You can run the core inference engine locally without starting the distributed servers:
 
 ```bash
 uv sync --group dev             # install project + dev deps (pytest)
@@ -117,7 +155,7 @@ To scrape and visualize worker metrics using Prometheus:
    ```bash
    export INFERSTREAM_METRICS_EXPORTER=prometheus
    export PROMETHEUS_PORT=9090
-   uv run python src/inferstream/worker/server.py
+   uv run inferstream-worker
    ```
 2. Configure your **Prometheus server** (`prometheus.yml`) to scrape the worker node endpoint:
    ```yaml

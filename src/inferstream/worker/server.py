@@ -44,14 +44,22 @@ def resolve_coordinator_addr(addr: str) -> str:
     if ":" not in addr:
         return addr  # no port — leave as-is
     host, port = addr.rsplit(":", 1)
+    # Strip brackets if the caller already passed an IPv6 literal like [::1]
+    host = host.strip("[]")
     try:
-        resolved_ip = socket.getaddrinfo(host, None, socket.AF_UNSPEC, socket.SOCK_STREAM)[0][4][0]
+        results = socket.getaddrinfo(host, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
+        resolved_ip = results[0][4][0]
+        family = results[0][0]
         if resolved_ip != host:
             logger.info(f"Resolved '{host}' → '{resolved_ip}' (mDNS/DNS)")
+        # IPv6 addresses must be wrapped in brackets when used with a port
+        if family == socket.AF_INET6:
+            return f"[{resolved_ip}]:{port}"
         return f"{resolved_ip}:{port}"
     except socket.gaierror as e:
         logger.warning(f"Could not resolve '{host}': {e} — using address as-is")
         return addr
+
 
 
 async def run_worker(
