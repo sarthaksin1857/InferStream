@@ -4,10 +4,22 @@
 #   ./scripts/start_all.sh --simulate — start services, fire 16 requests, print results
 
 SIMULATE=false
-for arg in "$@"; do
-    if [[ "$arg" == "--simulate" ]]; then
-        SIMULATE=true
-    fi
+MODEL=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --simulate)
+            SIMULATE=true
+            shift
+            ;;
+        --model)
+            MODEL="$2"
+            shift 2
+            ;;
+        *)
+            shift
+            ;;
+    esac
 done
 
 echo "Starting InferStream Distributed System..."
@@ -27,7 +39,11 @@ FRONTEND_PID=$!
 
 # Start the worker node in the background
 echo "Starting Worker Node..."
-uv run python src/inferstream/worker/server.py &
+if [[ -n "$MODEL" ]]; then
+    uv run python src/inferstream/worker/server.py --model "$MODEL" &
+else
+    uv run python src/inferstream/worker/server.py &
+fi
 WORKER_PID=$!
 
 # Cleanup function to kill background processes on exit

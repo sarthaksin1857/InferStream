@@ -1,6 +1,6 @@
 import os
 import grpc
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
@@ -25,6 +25,7 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 class GenerateRequest(BaseModel):
     prompt: str
     length: str = "short"
+    model_name: str = ""
 
 @app.get("/", response_class=HTMLResponse)
 async def read_index():
@@ -34,6 +35,12 @@ async def read_index():
 @app.post("/api/generate")
 async def submit_generate(req: GenerateRequest, request: Request):
     stub = request.app.state.stub
+    
+    # Check for active workers
+    status_req = coordinator_pb2.GetSystemStatusReq()
+    status_res = await stub.GetSystemStatus(status_req)
+    if not status_res.workers:
+        raise HTTPException(status_code=503, detail="No active workers available to process the request.")
     
     length_enum = coordinator_pb2.SHORT
     if req.length.lower() == "medium":
@@ -45,6 +52,7 @@ async def submit_generate(req: GenerateRequest, request: Request):
         parameters=coordinator_pb2.InferenceParameters(
             prompt=req.prompt,
             length=length_enum,
+            model_name=req.model_name
         )
     )
     res = await stub.SubmitRequest(grpc_req)
@@ -68,6 +76,21 @@ async def get_result(request_id: str, request: Request):
         "status": status_str,
         "generated_text": res.generated_text,
     }
+
+@app.get("/api/status")
+async def get_status(request: Request):
+    stub = request.app.state.stub
+    grpc_req = coordinator_pb2.GetSystemStatusReq()
+    res = await stub.GetSystemStatus(grpc_req)
+    
+    workers = []
+    for w in res.workers:
+        workers.append({
+            "worker_id": w.worker_id,
+            "model_name": w.model_name
+        })
+        
+    return {"workers": workers}
 
 def main():
     import uvicorn
