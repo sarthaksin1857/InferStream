@@ -14,6 +14,33 @@ from inferstream.inference.engine import ContinuousBatchingEngine
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Supported model aliases
+# ---------------------------------------------------------------------------
+# Maps short friendly names → full Hugging Face model IDs.
+# Users can pass either the alias or the full ID to --model.
+MODEL_ALIASES: dict[str, str] = {
+    "distilgpt2":   "distilgpt2",
+    "qwen2.5-0.5b": "Qwen/Qwen2.5-0.5B-Instruct",
+    "qwen2.5":      "Qwen/Qwen2.5-3B-Instruct",
+    "llama3.2":     "meta-llama/Llama-3.2-3B-Instruct",
+    "llama3.1":     "meta-llama/Llama-3.1-8B-Instruct",
+}
+
+def _resolve_model(name: str) -> str:
+    """Return the full HF model ID for a given alias or passthrough a full ID."""
+    return MODEL_ALIASES.get(name.lower(), name)
+
+def _print_supported_models() -> None:
+    col = max(len(k) for k in MODEL_ALIASES)
+    print("\nSupported model aliases:\n")
+    print(f"  {'ALIAS':<{col}}   FULL MODEL ID")
+    print(f"  {'-'*col}   {'-'*40}")
+    for alias, full in MODEL_ALIASES.items():
+        print(f"  {alias:<{col}}   {full}")
+    print()
+
+
 # Map TaskLength enum to max_new_tokens
 # Keep these small for interactive demos — each step() does one forward pass
 # per active slot, so high values multiply inference time linearly.
@@ -247,26 +274,48 @@ async def run_worker(
                 await asyncio.sleep(2.0)
 
 def main():
-    parser = argparse.ArgumentParser(description="InferStream Worker Node")
-    parser.add_argument(
-        "--coordinator", 
-        type=str, 
-        default="localhost:50051", 
-        help="Address of the coordinator (e.g. raspberrypi.local:50051)"
+    alias_help = ", ".join(f"{k} → {v}" for k, v in MODEL_ALIASES.items())
+    parser = argparse.ArgumentParser(
+        description="InferStream Worker Node",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--model", type=str, default="Qwen/Qwen2.5-3B-Instruct", help="Hugging Face model to load")
-    parser.add_argument("--max-ram-gb", type=float, default=16.0, help="Maximum allowed RAM overhead in GB")
-    parser.add_argument("--max-batch-size", type=int, default=8, help="Max concurrent requests (slots)")
-    parser.add_argument("--max-seq-len", type=int, default=2048, help="Max sequence length per slot")
+    parser.add_argument(
+        "--coordinator",
+        type=str,
+        default="localhost:50051",
+        help="Address of the coordinator (e.g. pi.local:50051 or 10.0.0.1:50051)",
+    )
+    parser.add_argument(
+        "--model",
+        type=str,
+        default="qwen2.5",
+        help=f"Model alias or full Hugging Face ID. Aliases: {alias_help}",
+    )
+    parser.add_argument("--list-models", action="store_true",
+                        help="Print supported model aliases and exit")
+    parser.add_argument("--max-ram-gb", type=float, default=16.0,
+                        help="Maximum allowed RAM overhead in GB")
+    parser.add_argument("--max-batch-size", type=int, default=8,
+                        help="Max concurrent requests (slots)")
+    parser.add_argument("--max-seq-len", type=int, default=2048,
+                        help="Max sequence length per slot")
     args = parser.parse_args()
+
+    if args.list_models:
+        _print_supported_models()
+        return
+
+    model_name = _resolve_model(args.model)
+    if model_name != args.model:
+        logger.info(f"Resolved model alias '{args.model}' → '{model_name}'")
 
     try:
         asyncio.run(run_worker(
             coordinator_addr=args.coordinator,
-            model_name=args.model,
+            model_name=model_name,
             max_ram_gb=args.max_ram_gb,
             max_batch_size=args.max_batch_size,
-            max_seq_len=args.max_seq_len
+            max_seq_len=args.max_seq_len,
         ))
     except KeyboardInterrupt:
         logger.info("Worker shutting down.")
