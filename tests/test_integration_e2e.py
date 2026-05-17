@@ -218,7 +218,10 @@ def test_e2e_distributed_inference() -> None:
         procs.append(frontend)
 
         worker = _start_service(
-            ["uv", "run", "python", "src/inferstream/worker/server.py"],
+            [
+                "uv", "run", "python", "src/inferstream/worker/server.py",
+                "--model", "distilgpt2",  # keep unit tests fast — override the Qwen default
+            ],
             "worker.log",
             env={"INFERSTREAM_METRICS_EXPORTER": "prometheus", "PROMETHEUS_PORT": "9090"},
         )
