@@ -40,6 +40,7 @@ import urllib.error
 import urllib.request
 import json
 import os
+import socket
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -143,6 +144,11 @@ def _wait_for_http(url: str, timeout: float = 30.0, interval: float = 1.0) -> No
 # Service lifecycle helpers
 # ---------------------------------------------------------------------------
 
+def _is_port_in_use(port: int) -> bool:
+    """Check if a port is already bound on localhost."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        return s.connect_ex(('localhost', port)) == 0
+
 PROJECT_ROOT = Path(__file__).parent.parent
 LOG_DIR      = Path("/tmp/inferstream_integration_test")
 
@@ -187,6 +193,13 @@ def test_e2e_distributed_inference() -> None:
         print(f"\n{'='*70}")
         print("  PHASE 1 — Starting services")
         print(f"{'='*70}")
+
+        # Ensure no zombie workers or services are running
+        for port, name in [(50051, "Coordinator"), (8000, "Frontend"), (9090, "Worker Metrics")]:
+            assert not _is_port_in_use(port), (
+                f"Port {port} is already in use! A zombie {name} process is "
+                f"likely running in the background. Kill it before running this test."
+            )
 
         coord = _start_service(
             ["uv", "run", "inferstream-coordinator"],
@@ -354,10 +367,26 @@ def test_e2e_distributed_inference() -> None:
             # The worker runs a Prometheus scrape endpoint on port 9090
             prom_resp = urllib.request.urlopen("http://localhost:9090/metrics", timeout=2)
             prom_text = prom_resp.read().decode("utf-8")
+            
+            token_sum = 0.0
+            token_count = 0.0
+            
             # Just print out lines related to our core metrics
             for line in prom_text.splitlines():
                 if "time_per_output_token_ms" in line or "kv_cache_size_mb" in line or "throughput" in line:
                     print(f"  {line}")
+                    if line.startswith("time_per_output_token_ms_sum"):
+                        token_sum = float(line.split()[1])
+                    elif line.startswith("time_per_output_token_ms_count"):
+                        token_count = float(line.split()[1])
+            
+            if token_count > 0 and token_sum > 0:
+                avg_ms_per_token = token_sum / token_count
+                tokens_per_sec = 1000.0 / avg_ms_per_token
+                print(f"\n  🎯 CALCULATED PERFORMANCE:")
+                print(f"  Average ms/token : {avg_ms_per_token:.2f} ms")
+                print(f"  Tokens per second: {tokens_per_sec:.2f} tokens/s")
+
         except Exception as e:
             print(f"  Failed to scrape worker metrics: {e}")
         print("=" * 70 + "\n")
