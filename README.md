@@ -37,8 +37,11 @@ Then start a worker in a separate terminal:
 # Quick test with a tiny model (~300 MB)
 uv run inferstream-worker --model distilgpt2 --max-ram-gb 2.0
 
-# Larger model for real workloads
-uv run inferstream-worker --model Qwen/Qwen2.5-3B-Instruct --max-ram-gb 16.0
+# Small Qwen model
+uv run inferstream-worker --model qwen2.5-0.5b --max-ram-gb 4.0
+
+# Full Qwen 3B (default)
+uv run inferstream-worker --model qwen2.5 --max-ram-gb 16.0
 ```
 
 Once running, open `http://localhost:8000/` in your browser to interact with the UI.
@@ -109,10 +112,26 @@ All commands are registered as package entry points and available via `uv run <c
 | Flag | Default | Description |
 |---|---|---|
 | `--coordinator` | `localhost:50051` | Coordinator address (supports IP, hostname, or mDNS `.local`) |
-| `--model` | `Qwen/Qwen2.5-3B-Instruct` | Hugging Face model to load |
+| `--model` | `qwen2.5` | Model alias or full Hugging Face ID (see table below) |
+| `--list-models` | — | Print supported model aliases and exit |
 | `--max-ram-gb` | `16.0` | RAM budget in GB (worker aborts if model + KV cache exceeds this) |
 | `--max-batch-size` | `8` | Max concurrent inference slots |
 | `--max-seq-len` | `2048` | Max sequence length per slot |
+
+### Supported Models
+
+| Alias | Full Model ID | Size | Use Case |
+|---|---|---|---|
+| `distilgpt2` | `distilgpt2` | ~300 MB | Fast local testing |
+| `qwen2.5-0.5b` | `Qwen/Qwen2.5-0.5B-Instruct` | ~1 GB | Lightweight inference |
+| `qwen2.5` | `Qwen/Qwen2.5-3B-Instruct` | ~6 GB | Default, general use |
+| `llama3.2` | `meta-llama/Llama-3.2-3B-Instruct` | ~6 GB | Llama, gated ⚠️ |
+| `llama3.1` | `meta-llama/Llama-3.1-8B-Instruct` | ~16 GB | Best Llama for 36GB RAM, gated ⚠️ |
+
+> ⚠️ **Gated models** (Llama): Accept the license at [huggingface.co/meta-llama](https://huggingface.co/meta-llama), then run `uv run huggingface-cli login` before starting the worker.
+
+
+You can also pass any full Hugging Face model ID directly to `--model`. Run `inferstream-worker --list-models` to print the alias table at any time.
 
 ## Commands & Testing
 
