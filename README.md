@@ -31,6 +31,11 @@ To spin up the full distributed system locally (Coordinator, Frontend UI, and Wo
 ./scripts/start_all.sh
 ```
 
+You can optionally specify a Hugging Face model to load (defaults to `Qwen/Qwen2.5-3B-Instruct`):
+```bash
+./scripts/start_all.sh --model meta-llama/Llama-3.1-8B-Instruct
+```
+
 This will boot all three services in the correct order in the background. It will automatically shut them all down cleanly when you press `Ctrl+C`.
 
 Once running, open `http://localhost:8000/` in your browser to interact with the UI.
@@ -49,10 +54,16 @@ You can run the lightweight Coordinator and Frontend on a low-power device like 
    *Note: Both services bind to `0.0.0.0` by default, so they are automatically accessible on your local network.*
 
 2. **On your MacBook (Worker)**:
-   Point the worker to your Raspberry Pi's local network hostname (or IP address):
+   Point the worker to your Raspberry Pi's local network hostname (or IP address) and set strict memory limits to protect your host machine from crashing:
    ```bash
-   uv run python src/inferstream/worker/server.py --coordinator raspberrypi.local:50051
+   uv run python src/inferstream/worker/server.py \
+       --coordinator raspberrypi.local:50051 \
+       --model meta-llama/Llama-3.1-8B-Instruct \
+       --max-ram-gb 36.0 \
+       --max-batch-size 16 \
+       --max-seq-len 4096
    ```
+   *Note: If you use a gated model like Llama 3.1, you must first authenticate by running `uv run huggingface-cli login`.*
 
 3. **Accessing the UI**:
    Open `http://raspberrypi.local:8000` in your MacBook's browser to access the chat interface.
