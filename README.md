@@ -35,6 +35,28 @@ This will boot all three services in the correct order in the background. It wil
 
 Once running, open `http://localhost:8000/` in your browser to interact with the UI.
 
+### Running Across Multiple Machines (e.g. Raspberry Pi + MacBook)
+
+You can run the lightweight Coordinator and Frontend on a low-power device like a Raspberry Pi, while running the heavy inference Worker on your MacBook.
+
+1. **On the Raspberry Pi (Coordinator + Frontend)**:
+   Ensure you have a 64-bit OS installed (like Raspberry Pi OS Lite 64-bit) to support Python dependencies.
+   Start the coordinator and frontend:
+   ```bash
+   uv run inferstream-coordinator &
+   uv run inferstream-frontend &
+   ```
+   *Note: Both services bind to `0.0.0.0` by default, so they are automatically accessible on your local network.*
+
+2. **On your MacBook (Worker)**:
+   Point the worker to your Raspberry Pi's local network hostname (or IP address):
+   ```bash
+   uv run python src/inferstream/worker/server.py --coordinator raspberrypi.local:50051
+   ```
+
+3. **Accessing the UI**:
+   Open `http://raspberrypi.local:8000` in your MacBook's browser to access the chat interface.
+
 ## Commands & Testing
 
 You can run the core inference engine locally without starting the distributed servers by running the standalone demo test:

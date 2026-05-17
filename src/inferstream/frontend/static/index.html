@@ -369,6 +369,10 @@
             });
             const data = await res.json();
             
+            if (!res.ok) {
+                throw new Error(data.detail || "Request failed");
+            }
+            
             if (data.request_id) {
                 pollResult(data.request_id, loadingId);
             } else {
@@ -377,7 +381,12 @@
         } catch (err) {
             console.error(err);
             const loadingEl = document.getElementById(loadingId);
-            if (loadingEl) loadingEl.textContent = "Network error connecting to backend.";
+            if (loadingEl) {
+                loadingEl.textContent = "Error: " + err.message;
+                loadingEl.style.color = '#ef4444';
+                loadingEl.classList.remove('bot');
+                loadingEl.classList.remove('loading-state');
+            }
             isPolling = false;
             inputEl.disabled = false;
             sendBtn.disabled = false;

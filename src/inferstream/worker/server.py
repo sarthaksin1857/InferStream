@@ -1,3 +1,4 @@
+import argparse
 import asyncio
 import logging
 import uuid
@@ -26,7 +27,16 @@ LENGTH_MAPPING = {
 # This directly caps the KV-cache memory this worker will use.
 MAX_SLOTS = 8
 
-async def run_worker():
+async def heartbeat_loop(stub, worker_id):
+    req = coordinator_pb2.HeartbeatReq(worker_id=worker_id)
+    while True:
+        try:
+            await stub.Heartbeat(req)
+        except Exception as e:
+            logger.error(f"Heartbeat failed: {e}")
+        await asyncio.sleep(5.0)
+
+async def run_worker(coordinator_addr: str = "localhost:50051"):
     # 1. Setup device and load model
     device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
     logger.info(f"Worker starting up. Using device: {device}")
@@ -53,7 +63,6 @@ async def run_worker():
 
     # 2. Connect to Coordinator
     worker_id = str(uuid.uuid4())
-    coordinator_addr = "localhost:50051"
     
     # We use an async channel
     async with grpc.aio.insecure_channel(coordinator_addr) as channel:
@@ -74,6 +83,9 @@ async def run_worker():
             return
             
         logger.info("Successfully registered. Starting polling loop...")
+        
+        # Start heartbeat loop
+        heartbeat_task = asyncio.create_task(heartbeat_loop(stub, worker_id))
 
         # Mapping from engine request_id → coordinator request_id so we
         # can correctly report results back to the coordinator.
@@ -175,8 +187,17 @@ async def run_worker():
                 await asyncio.sleep(2.0)
 
 def main():
+    parser = argparse.ArgumentParser(description="InferStream Worker Node")
+    parser.add_argument(
+        "--coordinator", 
+        type=str, 
+        default="localhost:50051", 
+        help="Address of the coordinator (e.g. raspberrypi.local:50051)"
+    )
+    args = parser.parse_args()
+
     try:
-        asyncio.run(run_worker())
+        asyncio.run(run_worker(coordinator_addr=args.coordinator))
     except KeyboardInterrupt:
         logger.info("Worker shutting down.")
 

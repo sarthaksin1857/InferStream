@@ -21,6 +21,10 @@ class CoordinatorServiceServicer(coordinator_pb2_grpc.CoordinatorServiceServicer
         request: coordinator_pb2.SubmitRequestReq,
         context: grpc.aio.ServicerContext,
     ) -> coordinator_pb2.SubmitRequestRes:
+        if not self.state_store.get_workers():
+            logger.error("Rejecting SubmitRequest: No active workers")
+            await context.abort(grpc.StatusCode.UNAVAILABLE, "No active workers available")
+
         request_id = str(uuid.uuid4())
         logger.info(f"Received SubmitRequest: prompt='{request.parameters.prompt}' (id={request_id})")
 
@@ -76,6 +80,14 @@ class CoordinatorServiceServicer(coordinator_pb2_grpc.CoordinatorServiceServicer
         self.state_store.register_worker(request.worker)
         return coordinator_pb2.RegisterWorkerRes(success=True)
 
+    async def Heartbeat(
+        self,
+        request: coordinator_pb2.HeartbeatReq,
+        context: grpc.aio.ServicerContext,
+    ) -> coordinator_pb2.HeartbeatRes:
+        self.state_store.record_heartbeat(request.worker_id)
+        return coordinator_pb2.HeartbeatRes(success=True)
+
     async def GetSystemStatus(
         self,
         request: coordinator_pb2.GetSystemStatusReq,
@@ -111,16 +123,26 @@ class CoordinatorServiceServicer(coordinator_pb2_grpc.CoordinatorServiceServicer
         return coordinator_pb2.SubmitResultsRes(success=True)
 
 
+async def prune_loop(state_store):
+    while True:
+        await state_store.prune_dead_workers(timeout_sec=15.0)
+        await asyncio.sleep(5.0)
+
 async def serve() -> None:
     server = grpc.aio.server()
+    servicer = CoordinatorServiceServicer()
     coordinator_pb2_grpc.add_CoordinatorServiceServicer_to_server(
-        CoordinatorServiceServicer(), server
+        servicer, server
     )
     listen_addr = "[::]:50051"
     server.add_insecure_port(listen_addr)
     logger.info(f"Starting Coordinator server on {listen_addr}")
+    
+    prune_task = asyncio.create_task(prune_loop(servicer.state_store))
+    
     await server.start()
     await server.wait_for_termination()
+    prune_task.cancel()
 
 
 def main():

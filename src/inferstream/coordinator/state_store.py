@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 import uuid
 import grpc
 
@@ -30,11 +31,39 @@ class StateStore:
         self.pending_queue: asyncio.Queue = asyncio.Queue()
         # Maps worker_id -> Worker object
         self.workers: Dict[str, coordinator_pb2.Worker] = {}
+        # Maps worker_id -> last heartbeat timestamp
+        self.last_heartbeat: Dict[str, float] = {}
+        # Maps worker_id -> set of assigned request_ids
+        self.assigned_tasks: Dict[str, Set[str]] = {}
 
     def register_worker(self, worker: coordinator_pb2.Worker) -> None:
         """Registers a worker with the state store."""
         self.workers[worker.worker_id] = worker
+        self.last_heartbeat[worker.worker_id] = time.time()
+        self.assigned_tasks[worker.worker_id] = set()
         logger.info(f"Registered worker {worker.worker_id} in state store (model: {worker.model_name})")
+
+    def record_heartbeat(self, worker_id: str) -> None:
+        if worker_id in self.workers:
+            self.last_heartbeat[worker_id] = time.time()
+
+    async def prune_dead_workers(self, timeout_sec: float = 15.0) -> None:
+        now = time.time()
+        dead_workers = []
+        for worker_id, last_seen in self.last_heartbeat.items():
+            if now - last_seen > timeout_sec:
+                dead_workers.append(worker_id)
+                
+        for worker_id in dead_workers:
+            logger.warning(f"Worker {worker_id} timed out. Pruning...")
+            self.workers.pop(worker_id, None)
+            self.last_heartbeat.pop(worker_id, None)
+            
+            tasks_to_requeue = self.assigned_tasks.pop(worker_id, set())
+            for req_id in tasks_to_requeue:
+                logger.info(f"Re-queuing task {req_id} from dead worker {worker_id}")
+                self.statuses[req_id] = coordinator_pb2.PENDING
+                await self.pending_queue.put(req_id)
 
     def get_workers(self) -> list[coordinator_pb2.Worker]:
         """Returns the list of all registered workers."""
@@ -60,6 +89,11 @@ class StateStore:
             self.statuses[request_id] = coordinator_pb2.COMPLETED
             self.results[request_id] = result
             logger.info(f"Job {request_id} completed.")
+            
+            for worker_id, tasks in self.assigned_tasks.items():
+                if request_id in tasks:
+                    tasks.remove(request_id)
+                    break
             
             # Mark as done in the queue only when actually finished
             try:
@@ -96,6 +130,10 @@ class StateStore:
                 request_id = self.pending_queue.get_nowait()
                 self.statuses[request_id] = coordinator_pb2.ASSIGNED
                 assigned_tasks.append(self.tasks.get(request_id))
+                
+                if worker.worker_id not in self.assigned_tasks:
+                    self.assigned_tasks[worker.worker_id] = set()
+                self.assigned_tasks[worker.worker_id].add(request_id)
             except asyncio.QueueEmpty:
                 break  # No more work available right now
 

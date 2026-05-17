@@ -21,6 +21,9 @@ service CoordinatorService {
   // Register a new worker node with the coordinator.
   rpc RegisterWorker(RegisterWorkerReq) returns (RegisterWorkerRes);
   
+  // Worker sends periodic liveness ping.
+  rpc Heartbeat(HeartbeatReq) returns (HeartbeatRes);
+  
   // Get system status (e.g., connected workers)
   rpc GetSystemStatus(GetSystemStatusReq) returns (GetSystemStatusRes);
   
@@ -85,6 +88,15 @@ message Worker {
 }
 
 message RegisterWorkerRes {
+  bool success = 1;
+}
+
+// --- Heartbeat ---
+message HeartbeatReq {
+  string worker_id = 1;
+}
+
+message HeartbeatRes {
   bool success = 1;
 }
 
