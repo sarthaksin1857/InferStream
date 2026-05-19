@@ -135,6 +135,21 @@ All commands are registered as package entry points and available via `uv run <c
 
 You can also pass any full Hugging Face model ID directly to `--model`. Run `inferstream-worker --list-models` to print the alias table at any time.
 
+## Performance / Load Testing
+
+Once your coordinator and worker nodes are running, you can measure inference throughput (tokens/sec) and latency using the included load testing script.
+
+To saturate the cluster and get your best tokens/sec performance:
+
+1. **Calculate total slots**: Check your worker `--max-batch-size` setting. If you have two nodes with `100` max batch size each, you have `200` total slots.
+2. **Send 1.5x - 2.0x requests**: Provide more concurrent requests than total slots to keep the continuous batching engine busy.
+
+```bash
+uv run python scripts/load_test.py --url http://localhost:8000 --requests 300 --length long --model llama3.1
+```
+
+*(Optional)* Pass `--count-tokens` to download the Hugging Face tokenizer for an exact token count instead of an estimation based on task length.
+
 ## Commands & Testing
 
 You can run the core inference engine locally without starting the distributed servers:
