@@ -56,6 +56,7 @@ async def heartbeat_loop(stub, worker_id):
     while True:
         try:
             await stub.Heartbeat(req)
+            logger.info(f"Heartbeat sent to coordinator.")
         except Exception as e:
             logger.error(f"Heartbeat failed: {e}")
         await asyncio.sleep(5.0)
@@ -181,6 +182,7 @@ async def run_worker(
         engine_to_coordinator_id: dict[int, str] = {}
 
         # 4. Polling Loop
+        step_count = 0
         while True:
             try:
                 # -------------------------------------------------------
@@ -230,6 +232,11 @@ async def run_worker(
                 # active slot and returns any requests that just finished.
                 if engine.has_pending_or_active():
                     completed = engine.step()
+                    step_count += 1
+
+                    if step_count % 20 == 0:
+                        active_count = len(engine.active_requests)
+                        logger.info(f"Generating tokens... [Active Slots: {active_count}/{engine.max_slots}]")
 
                     # -------------------------------------------------------
                     # 4c. Submit completed results back to the coordinator
