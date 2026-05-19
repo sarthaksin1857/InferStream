@@ -43,7 +43,7 @@ class CoordinatorServiceServicer(coordinator_pb2_grpc.CoordinatorServiceServicer
         status = self.state_store.get_status(request.request_id)
 
         if status is None:
-            logger.info(
+            logger.debug(
                 f"GetResult: request_id={request.request_id} → FAILED (unknown id)"
             )
             return coordinator_pb2.GetResultRes(
@@ -58,7 +58,7 @@ class CoordinatorServiceServicer(coordinator_pb2_grpc.CoordinatorServiceServicer
             coordinator_pb2.COMPLETED: "COMPLETED",
             coordinator_pb2.FAILED:    "FAILED",
         }
-        logger.info(
+        logger.debug(
             f"GetResult: request_id={request.request_id} "
             f"→ {status_names.get(status, status)}"
         )
@@ -107,7 +107,7 @@ class CoordinatorServiceServicer(coordinator_pb2_grpc.CoordinatorServiceServicer
         # If the worker doesn't set the field it defaults to 0, so we fall
         # back to 8 so old clients still get a full batch.
         max_batch = request.max_batch_size if request.max_batch_size > 0 else 8
-        logger.info(
+        logger.debug(
             f"Received GetWork: worker_id={request.worker_id} max_batch={max_batch}"
         )
 
@@ -129,7 +129,7 @@ class CoordinatorServiceServicer(coordinator_pb2_grpc.CoordinatorServiceServicer
 
 async def prune_loop(state_store):
     while True:
-        await state_store.prune_dead_workers(timeout_sec=120.0)
+        await state_store.prune_dead_workers(timeout_sec=600.0)
         await asyncio.sleep(5.0)
 
 async def serve() -> None:
