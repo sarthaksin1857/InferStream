@@ -51,12 +51,16 @@ LENGTH_MAPPING = {
     coordinator_pb2.LONG: 300,
 }
 
-async def heartbeat_loop(stub, worker_id):
-    req = coordinator_pb2.HeartbeatReq(worker_id=worker_id)
+async def heartbeat_loop(stub, register_req):
+    req = coordinator_pb2.HeartbeatReq(worker_id=register_req.worker.worker_id)
     while True:
         try:
-            await stub.Heartbeat(req)
-            logger.info(f"Heartbeat sent to coordinator.")
+            res = await stub.Heartbeat(req)
+            if not res.success:
+                logger.warning("Heartbeat rejected. Re-registering with coordinator...")
+                await stub.RegisterWorker(register_req)
+            else:
+                logger.info(f"Heartbeat sent to coordinator.")
         except Exception as e:
             logger.error(f"Heartbeat failed: {e}")
         await asyncio.sleep(5.0)
@@ -173,7 +177,7 @@ async def run_worker(
         logger.info("Successfully registered. Starting polling loop...")
         
         # Start heartbeat loop
-        heartbeat_task = asyncio.create_task(heartbeat_loop(stub, worker_id))
+        heartbeat_task = asyncio.create_task(heartbeat_loop(stub, register_req))
 
         # Mapping from engine request_id → coordinator request_id so we
         # can correctly report results back to the coordinator.
