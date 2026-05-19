@@ -222,33 +222,39 @@ class ContinuousBatchingEngine:
         metrics.observe("batch_size", active_count)
 
         # ==================================================================
-        # PHASE 2 — PREFILL
+        # PHASE 2 — PREFILL (LENGTH-GROUPED BATCHING)
         # ==================================================================
         prefilled_this_step: set = set()
 
+        from collections import defaultdict
+        prefill_groups = defaultdict(list)
         for slot in self.slots:
-            if not slot.needs_prefill:
-                continue
+            if slot.needs_prefill:
+                seq_len = slot.request.input_ids.shape[1]
+                prefill_groups[seq_len].append(slot)
 
-            req = slot.request
+        for seq_len, slots_in_group in prefill_groups.items():
+            num_active = len(slots_in_group)
+            
             with torch.no_grad():
                 metrics.start_timer("token_generation_time")
 
-                # Input length
-                seq_len = req.input_ids.shape[1]
-                # Compute attention on every word on every word
+                # Stack input IDs for this length group
+                batched_input_ids = torch.cat([s.request.input_ids for s in slots_in_group], dim=0)
+                
+                # Attention mask (all 1s since they are exactly the same length)
                 prefill_mask = torch.ones(
-                    (1, seq_len), dtype=torch.long, device=self.model.device
+                    (num_active, seq_len), dtype=torch.long, device=self.model.device
                 )
                 
-                # We can construct explicit position ids to be safe
-                position_ids = torch.arange(seq_len, dtype=torch.long, device=self.model.device).unsqueeze(0)
+                # Position IDs
+                position_ids = torch.arange(seq_len, dtype=torch.long, device=self.model.device).unsqueeze(0).expand(num_active, -1)
 
-                # Route cache updates to this specific slot
-                self.global_cache.active_slots = [slot.slot_id]
+                # Route cache updates to the slots in this group
+                self.global_cache.active_slots = [s.slot_id for s in slots_in_group]
 
                 outputs = self.model(
-                    input_ids=req.input_ids,
+                    input_ids=batched_input_ids,
                     attention_mask=prefill_mask,
                     position_ids=position_ids,
                     past_key_values=self.global_cache,
@@ -256,25 +262,19 @@ class ContinuousBatchingEngine:
                 )
 
                 # Pre soft max scores for each word
-                # [batch, sequence position, vocab size]
                 logits = outputs.logits[:, -1, :]
-                next_token = sample_next_token(logits, temperature=0.8, top_p=0.95)
-                req.generated_tokens.append(next_token.item())
-
-                # Update the sequence length for this slot
-                self.global_cache.slot_seq_lens[slot.slot_id] += seq_len
-
-                slot.needs_prefill = False
-                prefilled_this_step.add(slot.slot_id)
+                
+                # Batched sampling for the entire group at once!
+                next_tokens = sample_next_token(logits, temperature=0.8, top_p=0.95)
+                
+                for i, slot in enumerate(slots_in_group):
+                    slot.request.generated_tokens.append(next_tokens[i].item())
+                    self.global_cache.slot_seq_lens[slot.slot_id] += seq_len
+                    slot.needs_prefill = False
+                    prefilled_this_step.add(slot.slot_id)
 
                 duration = metrics.stop_timer("token_generation_time")
                 metrics.observe("time_to_first_token_ms", duration * 1000)
-
-            # CRITICAL FIX: Only prefill ONE slot per step!
-            # If we try to prefill 20 massive LLM prompts in a single step loop, 
-            # PyTorch will block the background asyncio thread for minutes,
-            # causing the heartbeat to fail and the coordinator to assume this node died!
-            break
 
         # ==================================================================
         # PHASE 3 — DECODE (BATCHED)
@@ -331,10 +331,13 @@ class ContinuousBatchingEngine:
                 )
 
                 logits = outputs.logits[:, -1, :]
+                
+                # Batched sampling for the entire decode batch!
+                next_tokens = sample_next_token(logits, temperature=0.8, top_p=0.95)
+                
                 for i, s in enumerate(active_decode_slots):
                     req = s.request
-                    next_token = sample_next_token(logits[i:i+1], temperature=0.8, top_p=0.95)
-                    req.generated_tokens.append(next_token.item())
+                    req.generated_tokens.append(next_tokens[i].item())
                     # Increment length for the appended token
                     self.global_cache.slot_seq_lens[s.slot_id] += 1
 
