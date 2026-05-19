@@ -107,17 +107,25 @@ class StaticSlotCache(DynamicCache):
         batch_size, num_heads, seq_len, head_dim = key_states.shape
         max_batch_seq_len = 0
         
+        is_prefill = getattr(self, "is_prefill", False)
+        
         for i, slot_id in enumerate(self.active_slots):
             current_len = self.slot_seq_lens[slot_id]
-            # Write new states directly into the pre-allocated cache
-            # [model layers, total batches, total attention heads, max_seq_langth, attention head dimension]
-            self.k_cache[layer_idx, slot_id, :, current_len : current_len + seq_len, :] = key_states[i]
-            self.v_cache[layer_idx, slot_id, :, current_len : current_len + seq_len, :] = value_states[i]
+            pad_len = self.active_slot_pad_lens[i] if is_prefill and hasattr(self, "active_slot_pad_lens") else 0
             
-            max_batch_seq_len = max(max_batch_seq_len, current_len + seq_len)
+            real_len = seq_len - pad_len
+            if real_len > 0:
+                self.k_cache[layer_idx, slot_id, :, current_len : current_len + real_len, :] = key_states[i, :, pad_len:, :]
+                self.v_cache[layer_idx, slot_id, :, current_len : current_len + real_len, :] = value_states[i, :, pad_len:, :]
+            
+            max_batch_seq_len = max(max_batch_seq_len, current_len + real_len)
 
-        # Return the rectangular slice for the current batch up to the max length.
-        # This memory is gathered for the forward pass, but the cache itself remains static.
+        if is_prefill:
+            # During prefill, Transformers computes attention on the sequence being passed in.
+            # It expects the cache to return the exact tensors it provided for self-attention.
+            return key_states, value_states
+            
+        # During decode, we gather from the static cache up to the max active length.
         k_out = self.k_cache[layer_idx, self.active_slots, :, :max_batch_seq_len, :]
         v_out = self.v_cache[layer_idx, self.active_slots, :, :max_batch_seq_len, :]
 
@@ -222,36 +230,47 @@ class ContinuousBatchingEngine:
         metrics.observe("batch_size", active_count)
 
         # ==================================================================
-        # PHASE 2 — PREFILL (LENGTH-GROUPED BATCHING)
+        # PHASE 2 — PREFILL (DYNAMIC BATCHING WITH PADDING)
         # ==================================================================
         prefilled_this_step: set = set()
 
-        from collections import defaultdict
-        prefill_groups = defaultdict(list)
-        for slot in self.slots:
-            if slot.needs_prefill:
-                seq_len = slot.request.input_ids.shape[1]
-                prefill_groups[seq_len].append(slot)
-
-        for seq_len, slots_in_group in prefill_groups.items():
-            num_active = len(slots_in_group)
+        prefill_slots = [s for s in self.slots if s.needs_prefill]
+        if prefill_slots:
+            num_active = len(prefill_slots)
             
             with torch.no_grad():
                 metrics.start_timer("token_generation_time")
 
-                # Stack input IDs for this length group
-                batched_input_ids = torch.cat([s.request.input_ids for s in slots_in_group], dim=0)
+                # Find max length to pad to
+                lengths = [s.request.input_ids.shape[1] for s in prefill_slots]
+                max_len = max(lengths)
                 
-                # Attention mask (all 1s since they are exactly the same length)
-                prefill_mask = torch.ones(
-                    (num_active, seq_len), dtype=torch.long, device=self.model.device
-                )
+                # Create batched padded tensors
+                batched_input_ids = torch.zeros((num_active, max_len), dtype=torch.long, device=self.model.device)
+                prefill_mask = torch.zeros((num_active, max_len), dtype=torch.long, device=self.model.device)
+                position_ids = torch.zeros((num_active, max_len), dtype=torch.long, device=self.model.device)
+                pad_lens = []
                 
-                # Position IDs
-                position_ids = torch.arange(seq_len, dtype=torch.long, device=self.model.device).unsqueeze(0).expand(num_active, -1)
+                pad_id = self.model.config.pad_token_id if hasattr(self.model.config, "pad_token_id") and self.model.config.pad_token_id is not None else 0
+                
+                for i, s in enumerate(prefill_slots):
+                    real_len = lengths[i]
+                    pad_len = max_len - real_len
+                    pad_lens.append(pad_len)
+                    
+                    # Left padding
+                    batched_input_ids[i, pad_len:] = s.request.input_ids[0]
+                    batched_input_ids[i, :pad_len] = pad_id
+                    
+                    prefill_mask[i, pad_len:] = 1
+                    
+                    # Position IDs for real tokens start at 0
+                    position_ids[i, pad_len:] = torch.arange(real_len, dtype=torch.long, device=self.model.device)
 
                 # Route cache updates to the slots in this group
-                self.global_cache.active_slots = [s.slot_id for s in slots_in_group]
+                self.global_cache.active_slots = [s.slot_id for s in prefill_slots]
+                self.global_cache.active_slot_pad_lens = pad_lens
+                self.global_cache.is_prefill = True
 
                 outputs = self.model(
                     input_ids=batched_input_ids,
@@ -260,6 +279,8 @@ class ContinuousBatchingEngine:
                     past_key_values=self.global_cache,
                     use_cache=True,
                 )
+                
+                self.global_cache.is_prefill = False
 
                 # Pre soft max scores for each word
                 logits = outputs.logits[:, -1, :]
@@ -267,9 +288,9 @@ class ContinuousBatchingEngine:
                 # Batched sampling for the entire group at once!
                 next_tokens = sample_next_token(logits, temperature=0.8, top_p=0.95)
                 
-                for i, slot in enumerate(slots_in_group):
+                for i, slot in enumerate(prefill_slots):
                     slot.request.generated_tokens.append(next_tokens[i].item())
-                    self.global_cache.slot_seq_lens[slot.slot_id] += seq_len
+                    self.global_cache.slot_seq_lens[slot.slot_id] += lengths[i]
                     slot.needs_prefill = False
                     prefilled_this_step.add(slot.slot_id)
 
