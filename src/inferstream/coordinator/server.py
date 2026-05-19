@@ -125,7 +125,7 @@ class CoordinatorServiceServicer(coordinator_pb2_grpc.CoordinatorServiceServicer
 
 async def prune_loop(state_store):
     while True:
-        await state_store.prune_dead_workers(timeout_sec=15.0)
+        await state_store.prune_dead_workers(timeout_sec=120.0)
         await asyncio.sleep(5.0)
 
 async def serve() -> None:
