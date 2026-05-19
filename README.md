@@ -2,6 +2,8 @@
 
 Building a distributed LLM inference system designed to run across local laptops and machines. The goal is to demonstrate distributed compute, request batching for efficiency, scalable inference throughput, and basic LLM serving concepts.
 
+![InferStream Chat Interface](InferStream.png)
+
 ## Architecture
 
 The system follows a simple distributed layout with an in-memory queue, avoiding the need for complex external brokers like Kafka or Redis.

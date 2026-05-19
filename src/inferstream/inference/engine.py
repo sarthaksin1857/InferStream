@@ -110,6 +110,7 @@ class StaticSlotCache(DynamicCache):
         for i, slot_id in enumerate(self.active_slots):
             current_len = self.slot_seq_lens[slot_id]
             # Write new states directly into the pre-allocated cache
+            # [model layers, total batches, total attention heads, max_seq_langth, attention head dimension]
             self.k_cache[layer_idx, slot_id, :, current_len : current_len + seq_len, :] = key_states[i]
             self.v_cache[layer_idx, slot_id, :, current_len : current_len + seq_len, :] = value_states[i]
             
@@ -233,7 +234,9 @@ class ContinuousBatchingEngine:
             with torch.no_grad():
                 metrics.start_timer("token_generation_time")
 
+                # Input length
                 seq_len = req.input_ids.shape[1]
+                # Compute attention on every word on every word
                 prefill_mask = torch.ones(
                     (1, seq_len), dtype=torch.long, device=self.model.device
                 )
@@ -252,6 +255,8 @@ class ContinuousBatchingEngine:
                     use_cache=True,
                 )
 
+                # Pre soft max scores for each word
+                # [batch, sequence position, vocab size]
                 logits = outputs.logits[:, -1, :]
                 next_token = sample_next_token(logits, temperature=0.8, top_p=0.95)
                 req.generated_tokens.append(next_token.item())
