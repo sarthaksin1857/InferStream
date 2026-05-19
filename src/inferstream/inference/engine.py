@@ -270,6 +270,12 @@ class ContinuousBatchingEngine:
                 duration = metrics.stop_timer("token_generation_time")
                 metrics.observe("time_to_first_token_ms", duration * 1000)
 
+            # CRITICAL FIX: Only prefill ONE slot per step!
+            # If we try to prefill 20 massive LLM prompts in a single step loop, 
+            # PyTorch will block the background asyncio thread for minutes,
+            # causing the heartbeat to fail and the coordinator to assume this node died!
+            break
+
         # ==================================================================
         # PHASE 3 — DECODE (BATCHED)
         # ==================================================================

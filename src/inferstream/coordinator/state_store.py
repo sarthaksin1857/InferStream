@@ -60,8 +60,9 @@ class StateStore:
             self.last_heartbeat.pop(worker_id, None)
             
             tasks_to_requeue = self.assigned_tasks.pop(worker_id, set())
+            if tasks_to_requeue:
+                logger.warning(f"CRITICAL: Worker {worker_id} disconnected! Re-assigning {len(tasks_to_requeue)} incomplete tasks back to the queue.")
             for req_id in tasks_to_requeue:
-                logger.info(f"Re-queuing task {req_id} from dead worker {worker_id}")
                 self.statuses[req_id] = coordinator_pb2.PENDING
                 await self.pending_queue.put(req_id)
 
