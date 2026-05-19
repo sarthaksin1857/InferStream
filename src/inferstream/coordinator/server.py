@@ -85,6 +85,10 @@ class CoordinatorServiceServicer(coordinator_pb2_grpc.CoordinatorServiceServicer
         request: coordinator_pb2.HeartbeatReq,
         context: grpc.aio.ServicerContext,
     ) -> coordinator_pb2.HeartbeatRes:
+        if request.worker_id not in self.state_store.workers:
+            logger.warning(f"Unknown worker {request.worker_id} sent heartbeat. Requesting re-registration.")
+            return coordinator_pb2.HeartbeatRes(success=False)
+            
         self.state_store.record_heartbeat(request.worker_id)
         return coordinator_pb2.HeartbeatRes(success=True)
 
