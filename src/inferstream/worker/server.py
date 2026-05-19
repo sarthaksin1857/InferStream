@@ -235,7 +235,8 @@ async def run_worker(
                 # Each step() call generates exactly one token for every
                 # active slot and returns any requests that just finished.
                 if engine.has_pending_or_active():
-                    completed = engine.step()
+                    loop = asyncio.get_running_loop()
+                    completed = await loop.run_in_executor(None, engine.step)
                     step_count += 1
 
                     if step_count % 20 == 0:
